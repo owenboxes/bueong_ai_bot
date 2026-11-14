@@ -9,7 +9,9 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import digest  # noqa: E402
+import private  # noqa: E402
 import watch  # noqa: E402
+from cryptography.fernet import Fernet  # noqa: E402
 
 ITEMS = [{"source": "HN", "title": f"글 {n}", "url": f"https://x/{n}"} for n in range(4)]
 KEY = {"GEMINI_API_KEY": "k"}
@@ -77,35 +79,50 @@ class Flow(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         patches = [
             mock.patch.object(watch, "QUEUE", self.tmp / "state" / "queue.json"),
-            mock.patch.object(digest, "OUTBOX", self.tmp / "state" / "outbox.json"),
+            mock.patch.object(private, "PATH", self.tmp / "state" / "private.enc"),
             mock.patch.object(digest, "DIGESTS", self.tmp / "digests"),
             mock.patch.object(digest, "rank", return_value=None),
             mock.patch.object(digest, "TG_LIMIT", 130),  # 메시지가 여러 조각이 되게
-            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.dict(os.environ, {"BUEONG_STATE_KEY": Fernet.generate_key().decode()}, clear=True),
         ]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
         watch.save(watch.QUEUE, ITEMS)
 
+    def box(self):
+        return private.load()["outbox"]
+
     def test_prepare_publishes_list_and_empties_queue(self):
         digest.prepare(NOW)
-        box = watch.load(digest.OUTBOX, {})
+        box = self.box()
         self.assertEqual((box["batch"], box["sent"]), ("2026-11-15-0800", 0))
         self.assertTrue((digest.DIGESTS / "2026-11-15-0800.md").exists())
         self.assertIn("digests/2026-11-15-0800.md", "".join(box["messages"]))
         self.assertEqual(watch.load(watch.QUEUE, None), [])
 
+    def test_pinned_sent_privately_and_not_in_public_list(self):
+        priv = private.load()
+        priv["pinned"] = [{"source": "보낸 링크", "title": "https://secret/tok=abc", "url": "https://secret/tok=abc",
+                           "kind": "link", "at": "x"}]
+        private.save(priv)
+        digest.prepare(NOW)
+        self.assertIn("secret/tok=abc", "".join(self.box()["messages"]))  # 텔레그램엔 보낸다
+        public = (digest.DIGESTS / "2026-11-15-0800.md").read_text("utf-8")
+        self.assertNotIn("secret", public)  # 공개 목록엔 없다
+        self.assertNotIn(b"secret", private.PATH.read_bytes())  # 저장 파일은 암호문
+        self.assertEqual(private.load()["pinned"], [])
+
     def test_batch_has_run_id_and_branch(self):
         with mock.patch.dict(os.environ, {"GITHUB_RUN_ID": "42", "GITHUB_RUN_ATTEMPT": "2", "GITHUB_REF_NAME": "dev"}):
             digest.prepare(NOW)
-        box = watch.load(digest.OUTBOX, {})
+        box = self.box()
         self.assertEqual(box["batch"], "2026-11-15-0800-42-2")
         self.assertIn("/blob/dev/digests/2026-11-15-0800-42-2.md", "".join(box["messages"]))
 
     def test_partial_send_resumes_without_resending(self):
         digest.prepare(NOW)
-        total = len(watch.load(digest.OUTBOX, {})["messages"])
+        total = len(self.box()["messages"])
         self.assertGreater(total, 1)
         sent = []
 
@@ -115,14 +132,14 @@ class Flow(unittest.TestCase):
             sent.append(text)
         with self.assertRaises(RuntimeError):
             digest.send_outbox(flaky)
-        self.assertEqual(watch.load(digest.OUTBOX, {})["sent"], 1)
+        self.assertEqual(self.box()["sent"], 1)
 
         watch.save(watch.QUEUE, ITEMS[:1])  # 그사이 새 글이 들어와도
         digest.prepare(NOW.replace(day=16))  # 다음 날 prepare는 남은 요약부터 (새 배치 안 만듦)
         self.assertEqual(watch.load(watch.QUEUE, None), ITEMS[:1])
         digest.send_outbox(lambda t, s: sent.append(t))
         self.assertEqual(len(sent), total)  # 첫 조각은 다시 보내지 않았다
-        self.assertEqual(watch.load(digest.OUTBOX, None), {})
+        self.assertEqual(self.box(), {})
 
 
 if __name__ == "__main__":

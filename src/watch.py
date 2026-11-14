@@ -3,6 +3,7 @@
 실행: python src/watch.py            (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID 필요)
       python src/watch.py --dry-run  (보내지 않고 화면에 출력)
 """
+import hashlib
 import html
 import json
 import os
@@ -21,6 +22,8 @@ from summary import summarize
 ROOT = Path(__file__).resolve().parent.parent
 SEEN = ROOT / "state" / "seen.json"
 QUEUE = ROOT / "state" / "queue.json"
+ALERTS = ROOT / "state" / "sent.json"  # 보낸 즉시 알림 {키: 글 정보}. 버튼 응답과 주간 리포트가 읽는다
+ALERT_DAYS = 35  # 이보다 오래된 알림 기록은 지운다 (주간 리포트에 충분)
 KST = timezone(timedelta(hours=9))
 UA = "Mozilla/5.0 (compatible; bueong-bot/0.1)"
 SEEN_CAP = 2000  # 출처당 기억할 글 수. 지금 피드에 있는 글은 항상 남긴다.
@@ -135,15 +138,37 @@ def format_instant(src_name, item, lines=()):
             + f"<a href=\"{html.escape(item['url'], quote=True)}\">🔗 원문 보기</a>")
 
 
-def send_telegram(text, silent):
-    data = urllib.parse.urlencode({
-        "chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text, "parse_mode": "HTML",
-        "disable_notification": "true" if silent else "false", "disable_web_page_preview": "true",
-    }).encode()
-    url = f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/sendMessage"
-    with urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=20) as r:
-        if not json.loads(r.read()).get("ok"):
-            raise RuntimeError("telegram ok=false")
+def telegram(method, **params):
+    """텔레그램 Bot API 호출. 결과(result)를 돌려주고, 실패하면 예외."""
+    data = urllib.parse.urlencode({k: json.dumps(v) if isinstance(v, (dict, list)) else v
+                                   for k, v in params.items()}).encode()
+    url = f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/{method}"
+    with urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=40) as r:
+        body = json.loads(r.read())
+    if not body.get("ok"):
+        raise RuntimeError(f"telegram {method} ok=false")
+    return body["result"]
+
+
+def alert_key(source, item_id):
+    # 출처까지 넣어 다른 피드의 같은 GUID가 겹치지 않게 한다
+    return hashlib.sha1(f"{source}\n{item_id}".encode()).hexdigest()[:12]  # 버튼 데이터 64바이트 한도 안에 들어가는 짧은 키
+
+
+def buttons(key):
+    return {"inline_keyboard": [[
+        {"text": "👍 유용해요", "callback_data": f"u:{key}"},
+        {"text": "👎 별로예요", "callback_data": f"d:{key}"},
+        {"text": "🌙 아침에 자세히", "callback_data": f"l:{key}"},
+    ]]}
+
+
+def send_telegram(text, silent, markup=None):
+    params = {"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text, "parse_mode": "HTML",
+              "disable_notification": "true" if silent else "false", "disable_web_page_preview": "true"}
+    if markup:
+        params["reply_markup"] = markup
+    telegram("sendMessage", **params)
 
 
 # ---------- 상태 ----------
@@ -163,7 +188,7 @@ def save(path, data):
     save_text(path, json.dumps(data, ensure_ascii=False, indent=1) + "\n")
 
 
-def process(src, items, seen, queue, send, now):
+def process(src, items, seen, queue, send, now, alerts=None):
     """새 글을 처리하고 (이 출처의 seen 목록, 보내기 실패 수)를 돌려준다. 실패한 글은 seen에 넣지 않아 다음에 다시 시도한다."""
     old = seen.get(src["name"])
     if old is None:  # 처음 보는 출처: 지금 있는 글은 본 것으로 기록만 한다 (첫 실행 폭탄 방지)
@@ -178,7 +203,11 @@ def process(src, items, seen, queue, send, now):
             fill_title(item)
         try:
             if src["mode"] == "instant":
-                send(format_instant(src["name"], item, summarize(src["name"], item)), is_quiet(now))
+                key = alert_key(src["name"], item["id"])
+                send(format_instant(src["name"], item, summarize(src["name"], item)), is_quiet(now), buttons(key))
+                if alerts is not None:
+                    alerts[key] = {"source": src["name"], "title": item["title"], "url": item["url"],
+                                   "at": now.isoformat(timespec="minutes")}
             else:
                 queue.append({"source": src["name"], "title": item["title"], "url": item["url"],
                               "at": now.isoformat(timespec="minutes")})
@@ -195,7 +224,7 @@ def process(src, items, seen, queue, send, now):
 def main():
     dry = "--dry-run" in sys.argv
     if dry:
-        send = lambda text, silent: print(("[무음] " if silent else "") + text + "\n")
+        send = lambda text, silent, markup=None: print(("[무음] " if silent else "") + text + "\n")
     else:
         if not os.environ.get("TELEGRAM_BOT_TOKEN") or not os.environ.get("TELEGRAM_CHAT_ID"):
             sys.exit("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID가 없습니다 (시험하려면 --dry-run)")
@@ -203,6 +232,8 @@ def main():
     sources = yaml.safe_load((ROOT / "config" / "sources.yaml").read_text("utf-8"))["sources"]
     seen, queue = load(SEEN, {}), load(QUEUE, [])
     now = datetime.now(KST)
+    cutoff = (now - timedelta(days=ALERT_DAYS)).isoformat(timespec="minutes")
+    alerts = {k: v for k, v in load(ALERTS, {}).items() if v["at"] >= cutoff}
     failed, send_failed = [], 0
     for src in sources:
         print(src["name"])
@@ -212,10 +243,11 @@ def main():
             print(f"  읽기 실패: {e}")
             failed.append(src["name"])
             continue
-        seen[src["name"]], n = process(src, items, seen, queue, send, now)
+        seen[src["name"]], n = process(src, items, seen, queue, send, now, alerts)
         send_failed += n
     if not dry:  # 드라이런에서 본 글을 기록하면 실제 실행 때 건너뛰게 된다
         save(QUEUE, queue)  # 대기열 먼저: 중간에 실패하면 누락 대신 중복이 된다
+        save(ALERTS, alerts)
         save(SEEN, seen)
         if os.environ.get("GITHUB_OUTPUT"):  # 워크플로는 이 표시가 있을 때만 state/를 커밋한다
             with open(os.environ["GITHUB_OUTPUT"], "a") as f:

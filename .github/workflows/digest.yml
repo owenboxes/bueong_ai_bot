@@ -14,6 +14,8 @@ concurrency:
 
 jobs:
   digest:
+    # 텔레그램 입력 큐와 개인 기록은 하나뿐이라, 기본 브랜치에서만 돈다 (다른 브랜치로 수동 실행하면 입력이 그 브랜치에 갇힌다)
+    if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -28,6 +30,7 @@ jobs:
       - id: prepare
         run: python src/digest.py prepare
         env:
+          BUEONG_STATE_KEY: ${{ secrets.BUEONG_STATE_KEY }}   # 개인 기록(state/private.enc) 암호화 키
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}   # 없으면 중요도 정렬 없이 출처별 목록으로 보낸다
       - name: 전체 목록·메시지 확정분 게시 (링크가 404가 되지 않게 전송보다 먼저)
         if: steps.prepare.outputs.saved == 'true'
@@ -35,6 +38,7 @@ jobs:
       - id: send
         run: python src/digest.py send
         env:
+          BUEONG_STATE_KEY: ${{ secrets.BUEONG_STATE_KEY }}   # 개인 기록(state/private.enc) 암호화 키
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       - name: 보낸 진행도 커밋 (실패했어도 성공한 조각까지)

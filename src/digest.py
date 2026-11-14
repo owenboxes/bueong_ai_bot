@@ -12,12 +12,12 @@ import sys
 import urllib.error
 from datetime import datetime
 
+import private
 import summary
 import watch
 
 PRIORITIES = watch.ROOT / "config" / "priorities.md"  # 중요도 기준 (Gemini 담당 파일)
 DIGESTS = watch.ROOT / "digests"  # 배치별 전체 목록 (텔레그램 「나머지」 링크가 가리킴)
-OUTBOX = watch.ROOT / "state" / "outbox.json"  # 확정된 메시지와 보낸 개수
 TG_LIMIT = 4000  # 텔레그램 한도 4,096자보다 조금 여유
 RANK_TIMEOUT = 60  # 하루치를 한 번에 정렬하므로 즉시 알림보다 길게
 TITLE_MAX, LINE_MAX, URL_MAX = 100, 200, 500  # 블록 하나가 TG_LIMIT를 넘지 않게 하는 상한
@@ -84,10 +84,25 @@ def link(it, line=""):
     return f"[{esc(it['source'][:40])}] {a}" + (f" – {esc(line)}" if line else "")
 
 
-def build(items, ranks, list_url):
-    """텔레그램으로 보낼 메시지 블록 목록 (각 블록은 한 덩어리로 유지)."""
-    if not items:
+PINNED = (("link", "📌 보내준 링크"), ("later", "🌙 자세히 보기로 한 글"))  # 정렬 없이 항상 보여주는 구역
+
+
+def pinned_blocks(pinned):
+    blocks = []
+    for kind, name in PINNED:
+        picked = [it for it in pinned if it.get("kind") == kind]
+        if picked:
+            blocks.append(f"\n━ {name} ({len(picked)})")
+            blocks += [f"{n}. {link(it)}" for n, it in enumerate(picked, 1)]
+    return blocks
+
+
+def build(items, ranks, list_url, pinned=()):
+    """텔레그램으로 보낼 메시지 블록 목록 (각 블록은 한 덩어리로 유지). items는 정렬 대상, pinned는 고정 구역."""
+    if not items and not pinned:
         return ["🦉 좋은 아침이에요.\n밤사이 새로 들어온 글은 없었어요. 오늘도 잘 다녀와요."]
+    if not items:
+        return ["🦉 좋은 아침이에요.\n밤사이 새 글은 없었어요."] + pinned_blocks(pinned) + ["\n오늘도 잘 다녀와요."]
     blocks = [f"🦉 좋은 아침이에요.\n밤사이 {len(items)}건이 들어왔어요. 중요한 것부터 볼게요."]
     if ranks is None:  # 정렬 없이: 출처별 건수 + 전체 목록
         counts = {}
@@ -96,7 +111,7 @@ def build(items, ranks, list_url):
         blocks.append("오늘은 중요도 정렬을 못 했어요. 출처별로 모아뒀어요.")
         blocks += [f"• {esc(s[:40])} {n}건" for s, n in counts.items()]
         blocks.append(f"<a href=\"{list_url}\">→ 전체 목록 보기</a>")
-        return blocks
+        return blocks + pinned_blocks(pinned)
     for tier, name in ((1, "꼭 볼 것"), (2, "알아두면 좋은 것")):
         picked = [(it, line) for it, (t, line) in zip(items, ranks) if t == tier]
         if picked:
@@ -104,6 +119,7 @@ def build(items, ranks, list_url):
             blocks += [f"{n}. {link(it, line)}" for n, (it, line) in enumerate(picked, 1)]
     rest = sum(1 for t, _ in ranks if t == 3)
     blocks.append(f"\n━ 나머지 ({rest}) <a href=\"{list_url}\">→ 전체 목록 보기</a>")
+    blocks += pinned_blocks(pinned)
     blocks.append("\n위에 있는 것만 봐도 충분해요. 오늘도 잘 다녀와요.")
     return blocks
 
@@ -123,6 +139,7 @@ def split(blocks, limit=None):
 
 
 def full_list(items, ranks, batch):
+    """공개 저장소에 올리는 전체 목록. 개인 기록(보낸 링크·자세히)은 넣지 않는다."""
     lines = [f"# 부엉 아침 요약 {batch} — 전체 {len(items)}건", ""]
     order = sorted(range(len(items)), key=lambda i: (ranks[i][0] if ranks else 3, items[i]["source"]))
     for i in order:
@@ -139,12 +156,14 @@ def mark_saved():
 
 
 def prepare(now):
-    box = watch.load(OUTBOX, {})
+    priv = private.load()
+    box = priv["outbox"]  # 메시지에 보낸 링크가 들어 있어 개인 기록에 둔다
     if box.get("sent", 0) < len(box.get("messages", [])):  # 어제 다 못 보낸 요약부터 마저 보낸다
         print("이전 아침 요약을 이어서 보냅니다 (새 대기열은 내일로)")
         mark_saved()
         return
     items = watch.load(watch.QUEUE, [])
+    pinned = priv["pinned"]
     # 배치마다 고유 경로: 같은 날·같은 분에 다시 돌려도 이전 링크가 바뀌지 않게 실행 ID를 붙인다
     # Re-run은 RUN_ID를 재사용하므로 시도 번호(RUN_ATTEMPT)까지 붙인다
     run = "-".join(os.environ[k] for k in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT") if os.environ.get(k))
@@ -152,17 +171,19 @@ def prepare(now):
     repo = os.environ.get("GITHUB_REPOSITORY", "owenboxes/bueong_ai_bot")
     branch = os.environ.get("GITHUB_REF_NAME", "main")  # 실제로 게시되는 브랜치에 링크
     ranks = rank(items)
-    msgs = split(build(items, ranks, f"https://github.com/{repo}/blob/{branch}/digests/{batch}.md"))
+    msgs = split(build(items, ranks, f"https://github.com/{repo}/blob/{branch}/digests/{batch}.md", pinned))
     if items:
         DIGESTS.mkdir(exist_ok=True)
         watch.save_text(DIGESTS / f"{batch}.md", full_list(items, ranks, batch))
-    watch.save(OUTBOX, {"batch": batch, "messages": msgs, "sent": 0})  # outbox 먼저: 중간 실패 시 누락 대신 중복
+    priv.update(outbox={"batch": batch, "messages": msgs, "sent": 0}, pinned=[])
+    private.save(priv)  # 발송분 먼저: 중간 실패 시 누락 대신 중복
     watch.save(watch.QUEUE, [])
     mark_saved()
 
 
 def send_outbox(send):
-    box = watch.load(OUTBOX, {})
+    priv = private.load()
+    box = priv["outbox"]
     msgs, sent = box.get("messages", []), box.get("sent", 0)
     try:
         while sent < len(msgs):
@@ -170,7 +191,8 @@ def send_outbox(send):
             sent += 1
     finally:  # 실패해도 성공한 조각까지는 기록해 다음 실행에서 이어 보낸다
         if msgs:
-            watch.save(OUTBOX, {**box, "sent": sent} if sent < len(msgs) else {})
+            priv["outbox"] = {**box, "sent": sent} if sent < len(msgs) else {}
+            private.save(priv)
         mark_saved()
 
 
@@ -178,7 +200,8 @@ def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "--dry-run":
         items = watch.load(watch.QUEUE, [])
-        for m in split(build(items, rank(items), "https://example.invalid/digests/DRY.md")):
+        pinned = private.load()["pinned"] if os.environ.get("BUEONG_STATE_KEY") else []
+        for m in split(build(items, rank(items), "https://example.invalid/digests/DRY.md", pinned)):
             print(m + "\n" + "-" * 20)
     elif cmd == "prepare":
         prepare(datetime.now(watch.KST))

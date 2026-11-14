@@ -14,6 +14,8 @@ concurrency:
 
 jobs:
   watch:
+    # 텔레그램 입력 큐와 개인 기록은 하나뿐이라, 기본 브랜치에서만 돈다 (다른 브랜치로 수동 실행하면 입력이 그 브랜치에 갇힌다)
+    if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -31,6 +33,15 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}   # 없으면 요약 없이 원문 첫 문장으로 보낸다
+      - id: inbox
+        # 감시가 상태를 끝까지 저장했을 때만 (보내기 실패로 끝난 건 괜찮다). 반쯤 쓴 상태 위에 쌓지 않는다
+        if: always() && steps.watch.outputs.saved == 'true'
+        run: python src/inbox.py
+        env:
+          BUEONG_STATE_KEY: ${{ secrets.BUEONG_STATE_KEY }}   # 개인 기록(state/private.enc) 암호화 키
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       - name: state 커밋 (저장소 활동 유지도 겸함)
-        if: always() && steps.watch.outputs.saved == 'true'   # 상태를 끝까지 저장했을 때만 (보내기 실패로 끝났어도)
+        # 감시가 끝까지 저장했을 때만. inbox는 queue→feedback→offset 순으로 저장하고 다시 받은 입력은 건너뛰므로 중간 실패도 커밋해도 된다
+        if: always() && steps.watch.outputs.saved == 'true'
         run: bash .github/commit-state.sh watch

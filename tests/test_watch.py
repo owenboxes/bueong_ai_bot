@@ -37,23 +37,23 @@ class T(unittest.TestCase):
 
     def test_first_run_seeds_without_sending(self):
         sent, seen = [], {}
-        out, _ = watch.process(SRC, [item("a"), item("b")], seen, [], lambda t, s: sent.append(t), NOON)
+        out, _ = watch.process(SRC, [item("a"), item("b")], seen, [], lambda t, s, m=None: sent.append(t), NOON)
         self.assertEqual((out, sent), (["a", "b"], []))
 
     def test_new_item_sent_and_failed_send_retried(self):
         sent = []
-        out, _ = watch.process(SRC, [item("new"), item("a")], {"s": ["a"]}, [], lambda t, s: sent.append(t), NOON)
+        out, _ = watch.process(SRC, [item("new"), item("a")], {"s": ["a"]}, [], lambda t, s, m=None: sent.append(t), NOON)
         self.assertEqual(len(sent), 1)
         self.assertEqual(out, ["new", "a"])
 
-        def boom(t, s):
+        def boom(t, s, m=None):
             raise RuntimeError("down")
         out, failed = watch.process(SRC, [item("new"), item("a")], {"s": ["a"]}, [], boom, NOON)
         self.assertEqual((out, failed), (["a"], 1))  # 실패한 글은 seen에 안 넣어 다음 실행에 다시 보낸다
 
     def test_duplicate_id_in_one_feed_sent_once(self):
         sent = []
-        watch.process(SRC, [item("n"), item("n")], {"s": ["a"]}, [], lambda t, s: sent.append(t), NOON)
+        watch.process(SRC, [item("n"), item("n")], {"s": ["a"]}, [], lambda t, s, m=None: sent.append(t), NOON)
         self.assertEqual(len(sent), 1)
 
     def test_digest_goes_to_queue(self):
