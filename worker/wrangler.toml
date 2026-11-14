@@ -1,0 +1,19 @@
+# 부엉 Cloudflare Worker: 1단계 순환 감시 (시험용 봇)
+name = "bueong-proto"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[triggers]
+crons = ["* * * * *"]   # 감시: 매분 출처 1개 (아침 요약·주간 리포트 cron은 3·4단계에서)
+
+[[rules]]
+type = "Text"
+globs = ["**/*.md"]   # config/persona.md를 문자열로 묶는다
+
+[observability]
+enabled = true   # Workers Logs에서 실행마다 CPU 시간을 본다
+
+[[d1_databases]]
+binding = "DB"
+database_name = "bueong-proto"
+database_id = "76c8ee76-bd12-454f-97e6-37c9555bd79f"   # npx wrangler d1 create bueong-proto 결과로 바꾼다

@@ -1,0 +1,13 @@
+{
+  "name": "bueong-worker-proto",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --test-scheduled",
+    "deploy": "wrangler deploy",
+    "test": "node --test test/"
+  },
+  "devDependencies": {
+    "wrangler": "4.156.0"
+  }
+}
