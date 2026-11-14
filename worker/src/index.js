@@ -5,7 +5,7 @@
 // - fetch GET /digest/<batch>: 아침 요약 전체 목록 (비밀 링크)
 // - fetch POST /telegram: 텔레그램 webhook. 버튼·링크를 받는 즉시 기록하고 답한다 (inbox.js)
 // 비밀 값(wrangler secret): TG_TOKEN, TG_CHAT_ID, TG_SECRET(webhook 확인용 임의 문자열), GEMINI_API_KEY,
-//   BASE_URL(이 Worker 주소, 전체 목록 링크용. 공개 저장소에 주소를 남기지 않으려고 비밀 값으로 둔다)
+//   PAUSED(있으면 cron이 아무것도 안 함, 되돌리기용), BASE_URL(이 Worker 주소, 전체 목록 링크용. 공개 저장소에 주소를 남기지 않으려고 비밀 값으로 둔다)
 import { watch } from "./watch.js";
 import { handleTelegram } from "./inbox.js";
 import { prepare, sendOutbox, digestPage } from "./digest.js";
@@ -15,6 +15,7 @@ import priorities from "../../config/priorities.md"; // 아침 요약 중요도 
 
 export default {
   async scheduled(event, env, ctx) {
+    if (env.PAUSED) return; // 멈춤 스위치: secret PAUSED=1을 넣으면 바로 모든 cron이 아무것도 안 한다 (cron 설정 변경은 전파가 늦다)
     const now = new Date(event.scheduledTime);
     if (event.cron === "0 23 * * *") return prepare(env, now, persona, priorities);
     if (event.cron === "0 11 * * SUN") return weekly(env, now);

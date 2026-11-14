@@ -55,6 +55,28 @@ seen, retry(재시도 시각), alerts(보낸 즉시 알림 35일), queue(아침 
 | Gemini | 출처 대체 방법 조사(위 「조사 필요」), `src/gemini.js`(요약·정렬 호출과 응답 검증) |
 | Codex | D1 스키마 적용·배포·실행·측정·Actions 끄기, 모든 리뷰, 간단한 리뷰 수정 |
 
+## 5단계 전환 절차 (운영 봇)
+원칙: GitHub와 Worker가 동시에 보내는 시간(중복)도, 둘 다 안 보는 시간(누락)도 없게. 08:00 전후 30분(아침 요약)은 피한다.
+1. 시험 Worker를 cron 없이 다시 배포 (`--env test`). cron은 계정당 5개라 운영 3개와 같이 못 둔다
+2. 운영 D1 `bueong` 만들기 → wrangler.toml에 id → schema.sql 적용
+3. 운영 비밀 값: TG_TOKEN·TG_CHAT_ID·GEMINI_API_KEY(로컬 .env), TG_SECRET(새 무작위), BASE_URL(운영 Worker 주소)
+4. GitHub 워크플로 watch·digest 끄기 → 돌던 실행이 끝날 때까지 기다리기
+5. origin/main의 최신 `state/`를 임시 폴더로 꺼내 `scripts/export_state.py`로 SQL 만들기 → 운영 D1에 넣기 → SQL 지우기 (개인 기록 포함)
+   - 옮기는 것: seen(GitHub이 이미 본 글: 끈 뒤 새로 나온 글은 Worker가 보낸다), alerts(옛 알림 버튼), queue, pinned, feedback
+6. 운영 Worker 배포 (cron 켜짐) → 운영 봇 setWebhook (allowed_updates=["message","callback_query"], secret_token)
+7. 확인: 매분 감시 실행, 옛 알림 버튼·링크 답장, 다음 08:00 아침 요약
+예외(허용): arXiv는 id 형식이 달라 옮기지 않아, 전환 사이에 올라온 논문은 아침 요약에 빠질 수 있다 (GitHub seen에도 arXiv는 0건).
+되돌리기 (운영 Worker를 고칠 수 없을 때만):
+  a. 운영 Worker 멈춤: `wrangler secret put PAUSED`(값 1) — 새 cron 실행은 바로 아무것도 안 한다 (cron 설정 변경은 전파가 늦어 쓰지 않는다)
+  b. 운영 봇 deleteWebhook (GitHub inbox는 getUpdates라 webhook이 있으면 못 받는다)
+  c. 진행 중이던 실행이 끝나기를 기다린다: 로그에서 PAUSED 뒤 감시·outbox·webhook 실행이 더 없는 것을 2분 이상 확인
+  d. 넘길 것 정리: D1 queue·pinned를 SELECT해 사용자에게 한 번 보여 준다 (GitHub state/로 되옮기는 코드는 만들지 않음 — 드문 경로라)
+  e. GitHub 워크플로 켜기
+  감수할 것 (2026-11-14 사용자 결정):
+  - 누락: Worker에 쌓인 아침 요약 대기열·보낸 링크·🌙는 GitHub 아침 요약에 안 들어간다 (d에서 한 번 보여 주는 것으로 대신). Worker 기간의 버튼 기록은 GitHub 주간 집계에 없다
+  - 중복: GitHub seen은 전환 시점 그대로라, Worker가 보낸 알림 중 아직 피드 앞에 있는 글이 한 번 더 온다
+GitHub `state/`·`src/*.py`는 지우지 않고 보관만 한다.
+
 ## 정한 것 (3·4단계, 2026-11-14)
 - 아침 요약 전체 목록: Worker 주소 `/digest/<무작위 32자>` 비밀 링크. 공개 뉴스 제목·링크만 담고 개인 기록(보낸 링크·🌙)은 넣지 않는다. noindex·no-referrer·no-store·CSP. 35일 보관
 - 아침 요약 발송: 08:00 cron은 준비만, 매분 cron이 outbox를 이어 보낸다 (실패해도 1분 뒤 재시도, 같은 조각 5회 실패 시 건너뜀)

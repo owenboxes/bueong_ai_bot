@@ -1,5 +1,6 @@
-# 부엉 Cloudflare Worker (시험용 봇): 순환 감시·webhook·아침 요약
-name = "bueong-proto"
+# 부엉 Cloudflare Worker: 순환 감시·webhook·아침 요약·주간 리포트
+# 기본(npx wrangler deploy) = 운영 봇. 시험용 봇은 반드시 --env test (npx wrangler deploy --env test)
+name = "bueong"
 main = "src/index.js"
 compatibility_date = "2026-10-01"
 
@@ -8,12 +9,24 @@ crons = ["* * * * *", "0 23 * * *", "0 11 * * SUN"]   # 매분: 감시 + outbox 
 
 [[rules]]
 type = "Text"
-globs = ["**/*.md"]   # config/persona.md를 문자열로 묶는다
+globs = ["**/*.md"]   # config/persona.md·priorities.md를 문자열로 묶는다
 
 [observability]
 enabled = true   # Workers Logs에서 실행마다 CPU 시간을 본다
 
 [[d1_databases]]
 binding = "DB"
+database_name = "bueong"
+database_id = "98117eb6-ddd5-42f7-80fd-ac202cfba3cd"   # 운영 D1 (2026-11-14 전환 때 생성)
+
+# 시험용 봇: 전환 뒤엔 cron 없이 webhook 시험에만 쓴다 (cron은 계정당 5개라 운영 3개와 같이 둘 수 없다)
+[env.test]
+name = "bueong-proto"
+
+[env.test.triggers]
+crons = []
+
+[[env.test.d1_databases]]
+binding = "DB"
 database_name = "bueong-proto"
-database_id = "76c8ee76-bd12-454f-97e6-37c9555bd79f"   # npx wrangler d1 create bueong-proto 결과로 바꾼다
+database_id = "76c8ee76-bd12-454f-97e6-37c9555bd79f"
