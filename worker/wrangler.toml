@@ -1,10 +1,10 @@
-# 부엉 Cloudflare Worker: 1단계 순환 감시 (시험용 봇)
+# 부엉 Cloudflare Worker (시험용 봇): 순환 감시·webhook·아침 요약
 name = "bueong-proto"
 main = "src/index.js"
 compatibility_date = "2026-10-01"
 
 [triggers]
-crons = ["* * * * *"]   # 감시: 매분 출처 1개 (아침 요약·주간 리포트 cron은 3·4단계에서)
+crons = ["* * * * *", "0 23 * * *"]   # 매분: 감시 + 아침 요약 이어 보내기 / 23:00 UTC(08:00 KST): 아침 요약 준비. 주간 리포트는 4단계에서
 
 [[rules]]
 type = "Text"

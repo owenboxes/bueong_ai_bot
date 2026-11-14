@@ -1,6 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { summarize, firstSentence, validLines, DEFAULT_PERSONA, FORMAT } from "../src/gemini.js";
+import {
+  summarize,
+  rank,
+  firstSentence,
+  validLines,
+  DEFAULT_PERSONA,
+  DEFAULT_PRIORITIES,
+  FORMAT,
+  RANK_FORMAT,
+} from "../src/gemini.js";
 
 const ITEM = {
   title: "v2.1.325",
@@ -135,4 +144,106 @@ test("firstSentence와 validLines 유틸 동작", () => {
   assert.equal(firstSentence("가".repeat(300)).endsWith("…"), true);
   assert.equal(validLines("요약 한 줄\n→ 의미\n여분"), null);
   assert.equal(validLines(`${"가".repeat(301)}\n→ 의미`), null);
+});
+
+const RANK_ITEMS = [
+  { source: "OpenAI", title: "A", url: "https://openai.com/a" },
+  { source: "HN", title: "B", url: "https://news.ycombinator.com/b" },
+  { source: "arXiv", title: "C", url: "https://arxiv.org/c" },
+];
+
+test("rank: 정상 응답과 빠진 번호는 3등급으로 채운다", async (t) => {
+  const originalFetch = globalThis.fetch;
+  let capturedBody = null;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async (_url, init) => {
+    capturedBody = JSON.parse(init.body);
+    return makeOkResponse([
+      {
+        text: JSON.stringify([
+          { i: 0, tier: 1, line: "핵심 소식이에요." },
+          // i=1은 의도적으로 빠짐 -> [3, ""] 처리
+          { i: 2, tier: 2, line: "  참고할 만해요.  " },
+        ]),
+      },
+    ]);
+  };
+
+  const result = await rank({ GEMINI_API_KEY: "secret-test-key" }, RANK_ITEMS, "", "");
+  assert.deepEqual(result, [
+    [1, "핵심 소식이에요."],
+    [3, ""],
+    [2, "참고할 만해요."],
+  ]);
+  assert.equal(capturedBody.generationConfig.responseMimeType, "application/json");
+  assert.equal(
+    capturedBody.system_instruction.parts[0].text,
+    `${DEFAULT_PERSONA}\n\n${DEFAULT_PRIORITIES}\n\n${RANK_FORMAT}`,
+  );
+  assert.equal(
+    capturedBody.contents[0].parts[0].text,
+    "0. [OpenAI] A\n1. [HN] B\n2. [arXiv] C",
+  );
+});
+
+test("rank: 중복 번호나 bool tier는 전체 null을 반환하고 rank_failed 로그를 남긴다", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  const logs = [];
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    console.log = originalLog;
+  });
+
+  console.log = (msg) => logs.push(msg);
+
+  // 중복 번호
+  globalThis.fetch = async () =>
+    makeOkResponse([
+      {
+        text: JSON.stringify([
+          { i: 0, tier: 1, line: "요약" },
+          { i: 0, tier: 2, line: "중복" },
+        ]),
+      },
+    ]);
+  assert.equal(
+    await rank({ GEMINI_API_KEY: "secret-test-key" }, RANK_ITEMS, "p", "pr"),
+    null,
+  );
+
+  // bool tier (true/false)
+  globalThis.fetch = async () =>
+    makeOkResponse([{ text: JSON.stringify([{ i: 0, tier: true, line: "불리언" }]) }]);
+  assert.equal(
+    await rank({ GEMINI_API_KEY: "secret-test-key" }, RANK_ITEMS, "p", "pr"),
+    null,
+  );
+
+  assert.equal(logs.length, 2);
+  assert.deepEqual(JSON.parse(logs[0]), { event: "rank_failed", error: "invalid_format" });
+  assert.deepEqual(JSON.parse(logs[1]), { event: "rank_failed", error: "invalid_format" });
+});
+
+test("rank: 키가 없으면 fetch 없이 바로 null을 반환한다", async (t) => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalled = false;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () => {
+    fetchCalled = true;
+    throw new Error("should not call fetch");
+  };
+
+  assert.equal(await rank({}, RANK_ITEMS, "p", "pr"), null);
+  assert.equal(await rank({ GEMINI_API_KEY: "k" }, [], "p", "pr"), null);
+  assert.equal(fetchCalled, false);
 });

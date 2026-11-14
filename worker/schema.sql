@@ -15,3 +15,7 @@ CREATE TABLE IF NOT EXISTS health (source TEXT PRIMARY KEY, fails INTEGER NOT NU
 CREATE TABLE IF NOT EXISTS feedback (update_id INTEGER PRIMARY KEY, key TEXT, action TEXT NOT NULL, source TEXT, at TEXT NOT NULL);
 -- 아침 요약 고정 구역: 보낸 링크(link)·🌙 자세히(later). 아침 요약이 보낸 뒤 지운다
 CREATE TABLE IF NOT EXISTS pinned (kind TEXT NOT NULL, url TEXT NOT NULL, title TEXT, source TEXT, at TEXT NOT NULL, PRIMARY KEY (kind, url));
+-- 아침 요약 발송분: 메시지 조각(JSON 배열)과 보낸 조각 수. 다 보내면 지운다
+CREATE TABLE IF NOT EXISTS outbox (batch TEXT PRIMARY KEY, messages TEXT NOT NULL, sent INTEGER NOT NULL, tries INTEGER NOT NULL, at TEXT NOT NULL);
+-- 아침 요약 전체 목록 페이지 (35일). 주소 /digest/<batch>는 추측할 수 없는 무작위 값이다
+CREATE TABLE IF NOT EXISTS digests (batch TEXT PRIMARY KEY, html TEXT NOT NULL, at TEXT NOT NULL);

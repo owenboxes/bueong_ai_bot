@@ -7,11 +7,19 @@ export const MODEL = "gemini-3.5-flash-lite";
 export const MAX_BODY = 6000;
 export const MAX_LINE = 300;
 export const TIMEOUT_MS = 15000;
+export const RANK_TIMEOUT_MS = 60000;
+export const LINE_MAX = 200;
 export const FORMAT =
   "정확히 두 줄로만 답하세요. 1줄: 무엇이 나왔는지 한국어 한 문장. " +
   "2줄: '→ '로 시작하는, 이게 왜 중요한지 한 문장. 다른 말은 쓰지 마세요.";
 export const DEFAULT_PERSONA =
   "당신은 AI 소식을 차분한 존댓말로 전하는 올빼미 '부엉'입니다.";
+export const RANK_FORMAT =
+  "아래 글 목록을 중요도 기준에 따라 등급을 매기세요. JSON 배열로만 답하세요. " +
+  '각 원소: {"i": 글 번호, "tier": 1|2|3, "line": "1·2등급만, 한국어 한 문장 요약 (3등급은 빈 문자열)"}. ' +
+  "모든 글 번호를 한 번씩 포함하세요.";
+export const DEFAULT_PRIORITIES =
+  "1등급: 에이전트·SDK·도구 사용법, 신제품·요금·정책 변경. 2등급: 따라 해볼 수 있는 튜토리얼·예제. 나머지 3등급.";
 
 /** 원문에서 첫 문장을 추출해 limit 이내로 잘라 반환한다. */
 export function firstSentence(text, limit = 200) {
@@ -84,6 +92,16 @@ export async function askGemini(
     .join("");
 }
 
+function logFail(event, e) {
+  const error =
+    typeof e === "string"
+      ? e
+      : e?.status
+        ? `${e.name || "Error"} HTTP ${e.status}`
+        : e?.name || "Error";
+  console.log(JSON.stringify({ event, error }));
+}
+
 /**
  * 항목을 두 줄로 요약한다.
  * @param {{ GEMINI_API_KEY?: string }} env
@@ -110,15 +128,81 @@ export async function summarize(env, srcName, item, persona) {
       const text = await askGemini(`${sysPersona}\n\n${FORMAT}`, prompt, key);
       const lines = validLines(text);
       if (lines) return lines;
-      console.log(JSON.stringify({ event: "summary_failed", error: "invalid_format" }));
+      logFail("summary_failed", "invalid_format");
     } catch (e) {
-      const error = e?.status
-        ? `${e.name || "Error"} HTTP ${e.status}`
-        : e?.name || "Error";
-      console.log(JSON.stringify({ event: "summary_failed", error }));
+      logFail("summary_failed", e);
     }
   }
 
   const s = firstSentence(body);
   return s ? [s] : [];
+}
+
+/** Gemini rank 응답 배열을 검증해 `[tier, line]` 배열로 변환한다. 형식이 어긋나면 null. */
+export function checkRanks(rows, n) {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const result = Array.from({ length: n }, () => [3, ""]);
+  const seen = new Set();
+
+  for (const r of rows) {
+    if (!r || typeof r !== "object" || Array.isArray(r)) return null;
+    const { i, tier } = r;
+    const line = r.line ?? "";
+    if (
+      !(
+        Number.isInteger(i) &&
+        i >= 0 &&
+        i < n &&
+        !seen.has(i) &&
+        Number.isInteger(tier) &&
+        (tier === 1 || tier === 2 || tier === 3)
+      )
+    ) {
+      return null;
+    }
+    seen.add(i);
+    result[i] = [
+      tier,
+      typeof line === "string" && line.length <= LINE_MAX ? line.trim() : "",
+    ];
+  }
+  return result;
+}
+
+/**
+ * 아침 요약 대기열 항목들의 중요도 등급과 한 줄 요약을 매긴다.
+ * @param {{ GEMINI_API_KEY?: string }} env
+ * @param {Array<{ source: string, title: string, url?: string }>} items
+ * @param {string} [persona]
+ * @param {string} [priorities]
+ * @returns {Promise<Array<[number, string]> | null>}
+ */
+export async function rank(env, items, persona, priorities) {
+  const key = env?.GEMINI_API_KEY;
+  if (!key || !Array.isArray(items) || items.length === 0) return null;
+
+  const sysPersona =
+    typeof persona === "string" && persona.trim() ? persona : DEFAULT_PERSONA;
+  const sysPriorities =
+    typeof priorities === "string" && priorities.trim()
+      ? priorities
+      : DEFAULT_PRIORITIES;
+  const system = [sysPersona, sysPriorities, RANK_FORMAT].join("\n\n");
+  const prompt = items
+    .map((it, n) => `${n}. [${it.source}] ${it.title}`)
+    .join("\n");
+
+  try {
+    const raw = await askGemini(system, prompt, key, {
+      jsonMode: true,
+      timeoutMs: RANK_TIMEOUT_MS,
+    });
+    const rows = JSON.parse(raw);
+    const result = checkRanks(rows, items.length);
+    if (!result) logFail("rank_failed", "invalid_format");
+    return result;
+  } catch (e) {
+    logFail("rank_failed", e);
+    return null;
+  }
 }
