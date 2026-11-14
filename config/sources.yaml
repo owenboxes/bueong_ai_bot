@@ -1,0 +1,65 @@
+# 부엉이 감시하는 출처 목록
+# type: feed(RSS/Atom) | sitemap(사이트맵에서 path가 들어간 주소) | hn(Hacker News) | trending(GitHub 트렌딩)
+# mode: instant(즉시 알림) | digest(아침 요약 대기열)
+# include / exclude: 제목(트렌딩은 저장소 이름+설명)에 거는 정규식, 대소문자 무시. 줄을 지우면 필터가 꺼진다.
+
+sources:
+  - name: Anthropic 공식 뉴스
+    type: sitemap
+    url: https://www.anthropic.com/sitemap.xml
+    path: /news/
+    mode: instant
+
+  - name: OpenAI 공식 블로그
+    type: feed
+    url: https://openai.com/news/rss.xml
+    mode: instant
+
+  - name: Google Gemini 블로그
+    type: feed
+    url: https://blog.google/products/gemini/rss/
+    mode: instant
+
+  - name: Claude Code 릴리스
+    type: feed
+    url: https://github.com/anthropics/claude-code/releases.atom
+    mode: instant
+
+  - name: Claude Agent SDK (Python) 릴리스
+    type: feed
+    url: https://github.com/anthropics/claude-agent-sdk-python/releases.atom
+    mode: instant
+
+  - name: Claude Agent SDK (TypeScript) 릴리스
+    type: feed
+    url: https://github.com/anthropics/claude-agent-sdk-typescript/releases.atom
+    mode: instant
+
+  - name: Codex 릴리스
+    type: feed
+    url: https://github.com/openai/codex/releases.atom
+    mode: instant
+    exclude: "-(alpha|beta|rc)"   # 이 줄을 지우면 알파·베타도 받는다
+
+  - name: Hacker News
+    type: hn
+    url: https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=points%3E20&hitsPerPage=100
+    mode: digest
+    include: "\\b(ai|llms?|gpt|claude|gemini|agents?|agentic|mcp|codex|anthropic|openai)\\b"
+
+  - name: GeekNews
+    type: feed
+    url: https://news.hada.io/rss/news
+    mode: digest
+
+  - name: GitHub 트렌딩
+    type: trending
+    url: https://github.com/trending?since=daily
+    mode: digest
+    include: "agent|llm|mcp|claude|codex|gpt|gemini|\\bai\\b"
+
+  - name: arXiv 에이전트 논문
+    type: feed
+    url: https://rss.arxiv.org/rss/cs.AI
+    mode: digest
+    include: "\\bagent"

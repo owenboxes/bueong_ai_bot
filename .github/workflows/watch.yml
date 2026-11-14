@@ -1,0 +1,48 @@
+name: watch
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # 15분마다 (GitHub 사정으로 수십 분 늦을 수 있음)
+  workflow_dispatch:
+
+permissions:
+  contents: write   # state/ 커밋용
+
+concurrency:
+  group: bueong-state   # state/를 고치는 작업끼리 겹치지 않게
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}   # 예약 시점 SHA가 아니라 지금 브랜치 끝의 state/를 읽는다
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - id: watch
+        run: python src/watch.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      - name: state 커밋 (저장소 활동 유지도 겸함)
+        if: always() && steps.watch.outputs.saved == 'true'   # 상태를 끝까지 저장했을 때만 (보내기 실패로 끝났어도)
+        run: |
+          git config user.name "bueong-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state
+          git diff --cached --quiet && exit 0
+          git commit -m "state: watch $(date -u +%FT%TZ)"
+          # 그사이 브랜치가 앞서 나갔으면 그 위에 다시 얹어서 push (실패하면 다음 실행에서 같은 알림이 반복되므로)
+          for i in 1 2 3; do
+            if git pull --rebase && git push; then exit 0; fi
+            if [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; then
+              git rebase --abort; echo "rebase 충돌: state/를 손으로 고친 커밋이 있는지 확인"; exit 1
+            fi
+            sleep 5
+          done
+          exit 1
