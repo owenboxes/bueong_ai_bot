@@ -27,13 +27,14 @@ def first_sentence(text, limit=200):
     return s if len(s) <= limit else s[:limit].rstrip() + "…"
 
 
-def ask_gemini(system, prompt, key, limit=TIMEOUT):
+def ask_gemini(system, prompt, key, limit=TIMEOUT, json_mode=False):
     """limit초 안에 응답을 다 받지 못하면 TimeoutError. 응답이 조금씩 계속 와도 전체 시간으로 끊는다."""
     deadline = time.monotonic() + limit
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
     body = json.dumps({
         "system_instruction": {"parts": [{"text": system}]},
         "contents": [{"parts": [{"text": prompt}]}],
+        **({"generationConfig": {"responseMimeType": "application/json"}} if json_mode else {}),
     }).encode()
     req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json", "x-goog-api-key": key})
     chunks = []

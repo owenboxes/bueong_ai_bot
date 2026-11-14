@@ -82,7 +82,7 @@ def parse_trending(page):
             continue
         repo = m.group(1)
         d = re.search(r"<p class=\"col-9[^\"]*\">(.*?)</p>", block, re.S)
-        desc = html.unescape(re.sub(r"\s+", " ", d.group(1)).strip()) if d else ""
+        desc = strip_html(d.group(1)) if d else ""  # 설명 안에 <a> 같은 태그가 섞여 온다
         items.append({"id": repo, "title": f"{repo} — {desc}" if desc else repo,
                       "url": f"https://github.com/{repo}", "text": f"{repo} {desc}"})
     return items
@@ -152,11 +152,15 @@ def load(path, default):
     return json.loads(path.read_text("utf-8")) if path.exists() else default
 
 
-def save(path, data):
+def save_text(path, text):
     path.parent.mkdir(exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", "utf-8")
-    os.replace(tmp, path)  # 반쯤 쓰인 JSON이 남지 않게 통째로 바꿔치기
+    tmp.write_text(text, "utf-8")
+    os.replace(tmp, path)  # 반쯤 쓰인 파일이 남지 않게 통째로 바꿔치기
+
+
+def save(path, data):
+    save_text(path, json.dumps(data, ensure_ascii=False, indent=1) + "\n")
 
 
 def process(src, items, seen, queue, send, now):
