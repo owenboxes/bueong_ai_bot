@@ -1,7 +1,7 @@
 """부엉 3단계: 매일 08:00(KST) 아침 요약.
 
 두 단계로 나눠 실행한다 (워크플로가 사이에 커밋·push):
-  python src/digest.py prepare  대기열을 정렬해 전체 목록(digests/배치.md)과 보낼 메시지(state/outbox.json)를 확정하고 대기열을 비운다
+  python src/digest.py prepare  대기열을 정렬해 전체 목록(digests/배치.md)과 보낼 메시지(개인 기록 state/private.enc의 outbox)를 확정하고 대기열을 비운다
   python src/digest.py send     outbox의 메시지를 이어서 보낸다. 성공한 조각까지 진행도를 저장한다
   python src/digest.py --dry-run  정렬·메시지만 출력 (상태 변경 없음)
 """
