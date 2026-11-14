@@ -62,7 +62,7 @@ test("split: 블록을 자르지 않고 한도 안으로 묶는다", () => {
 test("prepare: 발송분·전체 목록을 만들고, 이 시각 전의 대기열·핀만 비운다", async () => {
   put("INSERT INTO queue VALUES ('GeekNews', 'a', '글 a', 'https://x/a', '2026-11-14T10:00:00.000Z')");
   put("INSERT INTO queue VALUES ('GeekNews', 'b', '글 b', 'https://x/b', ?)", AM8.toISOString()); // 정렬 중에 들어온 글
-  put("INSERT INTO pinned VALUES ('link', 'https://l', 'https://l', '보낸 링크', '2026-11-14T12:00:00.000Z')");
+  put("INSERT INTO pinned VALUES ('link', 'https://l', '링크 제목', '보낸 링크', '2026-11-14T12:00:00.000Z', '한 줄 정리')");
   await prepare(env, AM8);
   const [box] = rows("SELECT * FROM outbox");
   assert.equal(box.sent, 0);
@@ -70,7 +70,7 @@ test("prepare: 발송분·전체 목록을 만들고, 이 시각 전의 대기�
   const text = JSON.parse(box.messages).join("\n");
   assert.match(text, /밤사이 1건/);
   assert.ok(text.includes(`https://w/digest/${box.batch}`));
-  assert.match(text, /보내준 링크 \(1\)/);
+  assert.match(text, /보내준 링크 \(1\)\n1\. \[보낸 링크\] <a href="https:\/\/l\/?">링크 제목<\/a> – 한 줄 정리/);
   assert.deepEqual(rows("SELECT id FROM queue"), [{ id: "b" }]); // 내일로
   assert.equal(rows("SELECT * FROM pinned").length, 0);
   assert.equal(rows("SELECT batch FROM digests")[0].batch, box.batch);

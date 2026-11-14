@@ -14,8 +14,11 @@ CREATE TABLE IF NOT EXISTS health (source TEXT PRIMARY KEY, fails INTEGER NOT NU
 -- 버튼 누름·보낸 메시지 (35일). update_id로 텔레그램 재전송을 한 번만 받는다. 주간 리포트가 읽는다
 CREATE TABLE IF NOT EXISTS feedback (update_id INTEGER PRIMARY KEY, key TEXT, action TEXT NOT NULL, source TEXT, at TEXT NOT NULL);
 -- 아침 요약 고정 구역: 보낸 링크(link)·🌙 자세히(later). 아침 요약이 보낸 뒤 지운다
-CREATE TABLE IF NOT EXISTS pinned (kind TEXT NOT NULL, url TEXT NOT NULL, title TEXT, source TEXT, at TEXT NOT NULL, PRIMARY KEY (kind, url));
+CREATE TABLE IF NOT EXISTS pinned (kind TEXT NOT NULL, url TEXT NOT NULL, title TEXT, source TEXT, at TEXT NOT NULL, line TEXT, PRIMARY KEY (kind, url));
+-- 이미 만든 DB에는 한 번만: ALTER TABLE pinned ADD COLUMN line TEXT;  (보낸 링크 원본 정리 한 줄, 2026-11-14)
 -- 아침 요약 발송분: 메시지 조각(JSON 배열)과 보낸 조각 수. 다 보내면 지운다
 CREATE TABLE IF NOT EXISTS outbox (batch TEXT PRIMARY KEY, messages TEXT NOT NULL, sent INTEGER NOT NULL, tries INTEGER NOT NULL, at TEXT NOT NULL);
 -- 아침 요약 전체 목록 페이지 (35일). 주소 /digest/<batch>는 추측할 수 없는 무작위 값이다
 CREATE TABLE IF NOT EXISTS digests (batch TEXT PRIMARY KEY, html TEXT NOT NULL, at TEXT NOT NULL);
+-- 출처별 설정 바꾸기 (주간 리포트 버튼). 없으면 sources.js 기본값
+CREATE TABLE IF NOT EXISTS settings (source TEXT PRIMARY KEY, mode TEXT NOT NULL, at TEXT NOT NULL);

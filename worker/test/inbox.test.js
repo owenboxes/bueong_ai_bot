@@ -87,3 +87,64 @@ test("D1이 실패하면 500이 나가 텔레그램이 다시 보낸다 (입력 
   env.DB.batch = async () => { throw new Error("D1 down"); };
   await assert.rejects(handleUpdate(say("https://a.com"), env, NOON), /D1 down/);
 });
+
+test("보낸 링크: 답은 바로, 응답 뒤에 페이지 제목과 한 줄을 pinned에 붙인다", async (t) => {
+  const realFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = realFetch; });
+  globalThis.fetch = async (url) => {
+    if (String(url).startsWith("https://generativelanguage.googleapis.com/")) {
+      return Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: "새 SDK 사용법 글이에요." }] } }] });
+    }
+    return new Response('<head><meta property="og:title" content="SDK &amp; 가이드"><meta name="description" content="설명"></head>');
+  };
+  const jobs = [];
+  const r = await handleUpdate(say("https://a.com/x https://b.com/y"), { ...env, GEMINI_API_KEY: "k" }, NOON, { later: (p) => jobs.push(p) });
+  assert.match(r.text, /받았어요/);
+  assert.equal(jobs.length, 1); // 첫 링크만
+  await Promise.all(jobs);
+  assert.deepEqual(rows("SELECT url, title, line FROM pinned ORDER BY url"), [
+    { url: "https://a.com/x", title: "SDK & 가이드", line: "새 SDK 사용법 글이에요." },
+    { url: "https://b.com/y", title: "https://b.com/y", line: null },
+  ]);
+
+  globalThis.fetch = async () => new Response("", { status: 500 }); // 페이지를 못 읽어도 링크 기록은 그대로
+  const later = [];
+  await handleUpdate(say("https://c.com", 30), env, NOON, { later: (p) => later.push(p) });
+  await Promise.all(later);
+  assert.equal(rows("SELECT title FROM pinned WHERE url = 'https://c.com'")[0].title, "https://c.com");
+});
+
+test("링크 주소 검사: 내부로 향하는 주소는 열지 않는다", async () => {
+  const { allowed } = await import("../src/links.js");
+  for (const ok of ["https://openai.com/x", "http://a.b.co:80/", "https://sub.example.org:443/p?q=1"]) assert.ok(allowed(ok), ok);
+  for (const bad of ["ftp://a.com", "javascript:alert(1)", "http://127.0.0.1/", "http://0x7f.1/", "http://2130706433/", "http://[::1]/",
+    "http://localhost/", "http://localhost./", "http://a.localhost/", "http://printer.local/", "http://db.internal/", "http://router/",
+    "http://u:p@a.com/", "https://a.com:8443/", "not a url"]) assert.equal(allowed(bad), null, bad);
+});
+
+test("리디렉션을 직접 따라가며 매번 검사한다", async (t) => {
+  const { fetchSafe } = await import("../src/links.js");
+  const realFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = realFetch; });
+  const seen = [];
+  const hop = (to) => new Response(null, { status: 302, headers: { location: to } });
+  const routes = {
+    "https://a.com/1": () => hop("/2"), // 상대 주소
+    "https://a.com/2": () => hop("https://b.com/end"),
+    "https://b.com/end": () => new Response("<title>끝</title>"),
+    "https://a.com/evil": () => hop("http://169.254.169.254/latest"),
+    "https://a.com/loop": () => hop("https://a.com/loop"),
+  };
+  globalThis.fetch = async (url, init) => { seen.push(url); assert.equal(init.redirect, "manual"); return routes[url](); };
+  assert.equal((await fetchSafe("https://a.com/1")).text, "<title>끝</title>");
+  await assert.rejects(fetchSafe("https://a.com/evil"), /막힌 주소/);
+  assert.ok(!seen.includes("http://169.254.169.254/latest")); // 내부 주소에는 요청 자체가 가지 않는다
+  await assert.rejects(fetchSafe("https://a.com/loop"), /너무 많음/);
+});
+
+test("pageMeta: 속성 순서·작은따옴표·속성 붙은 <title>도 찾는다", async () => {
+  const { pageMeta } = await import("../src/watch.js");
+  assert.deepEqual(pageMeta('<meta content="A &amp; B" property="og:title"><meta name="description" content="설명">'), { title: "A & B", description: "설명" });
+  assert.deepEqual(pageMeta("<title data-rh='true'>제목</title><meta property='og:description' content='og 설명'>"), { title: "제목", description: "og 설명" });
+  assert.deepEqual(pageMeta("<script>...</script>"), { title: "", description: "" });
+});

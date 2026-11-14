@@ -5,7 +5,7 @@ import { pick, parse, filterTitles } from "./sources.js";
 import { summarize } from "./gemini.js";
 import { tg } from "./telegram.js";
 
-const UA = "Mozilla/5.0 (compatible; bueong-bot/0.1)";
+export const UA = "Mozilla/5.0 (compatible; bueong-bot/0.1)";
 const MAX_SEND = 3; // 한 번에 보내기를 시도할 즉시 알림 수 (Gemini 호출도 그만큼)
 const FEED_TIMEOUT_MS = 10_000;
 const RETRY_AFTER_MS = 60 * 60 * 1000; // 실패한 글은 1시간 뒤에 다시 시도
@@ -14,7 +14,7 @@ const D1_MAX_PARAMS = 100; // D1은 쿼리 하나에 바인딩 값 100개까지
 
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-async function get(url, max) {
+export async function get(url, max) {
   const res = await fetch(url, { headers: { "user-agent": UA }, signal: AbortSignal.timeout(FEED_TIMEOUT_MS) });
   if (!res.ok) {
     await res.body?.cancel();
@@ -48,13 +48,25 @@ const buttons = (key) => ({ inline_keyboard: [[
 ]] });
 
 /** 제목 없는 글(Anthropic): 글 페이지 앞부분의 og:title, 없으면 주소 끝 단어 */
+/** 글 페이지 앞부분에서 제목·설명 (og:title → <title>, description → og:description) */
+export function pageMeta(text) {
+  // <meta>는 속성 순서가 사이트마다 달라 태그 하나를 통째로 잡고 그 안에서 찾는다
+  const meta = (key) => {
+    const want = new RegExp(`(?:property|name)=["']${key}["']`, "i");
+    for (const [tag] of text.matchAll(/<meta\b[^>]*>/gi)) {
+      if (want.test(tag)) return (tag.match(/content=["']([^"']*)["']/i) || [])[1];
+    }
+  };
+  const title = meta("og:title") || (text.match(/<title\b[^>]*>([^<]*)/i) || [])[1] || "";
+  const description = meta("og:description") || meta("description") || "";
+  return { title: stripHtml(title), description: stripHtml(description) };
+}
+
 async function fillTitle(item) {
   try {
-    const { text } = await get(item.url, MAX_BYTES);
-    const t = text.match(/<meta property="og:title" content="([^"]*)"/) || text.match(/<title>([^<]*)/);
-    item.title = t ? stripHtml(t[1]) : "";
-    const d = text.match(/<meta (?:name="description"|property="og:description") content="([^"]*)"/);
-    item.summary = d ? d[1] : "";
+    const { title, description } = pageMeta((await get(item.url, MAX_BYTES)).text);
+    item.title = title;
+    item.summary = description;
   } catch (e) {
     console.log(JSON.stringify({ event: "title_failed", error: e.message }));
   }
@@ -74,8 +86,10 @@ async function knownIds(db, source, ids) {
 }
 
 export async function watch(env, now = new Date(), persona = "") {
-  const src = pick(now);
-  const db = env.DB, at = now.toISOString(), name = src.name;
+  const db = env.DB, at = now.toISOString();
+  const base = pick(now);
+  const setting = await db.prepare("SELECT mode FROM settings WHERE source = ?").bind(base.name).first(); // 주간 리포트 버튼으로 바꾼 설정
+  const src = setting ? { ...base, mode: setting.mode } : base, name = src.name;
   let read, items;
   try {
     const max = src.max || MAX_BYTES;

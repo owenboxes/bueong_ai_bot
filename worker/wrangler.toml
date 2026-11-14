@@ -4,7 +4,7 @@ main = "src/index.js"
 compatibility_date = "2026-10-01"
 
 [triggers]
-crons = ["* * * * *", "0 23 * * *"]   # 매분: 감시 + 아침 요약 이어 보내기 / 23:00 UTC(08:00 KST): 아침 요약 준비. 주간 리포트는 4단계에서
+crons = ["* * * * *", "0 23 * * *", "0 11 * * SUN"]   # 매분: 감시 + outbox 이어 보내기 / 08:00 KST 아침 요약 준비 / 일 20:00 KST 주간 리포트 준비
 
 [[rules]]
 type = "Text"

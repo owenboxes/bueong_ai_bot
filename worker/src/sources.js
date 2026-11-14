@@ -1,19 +1,20 @@
 // 출처 목록과 순환 순서. CPU 10ms 한도 때문에 실행 한 번에 출처 1개만 읽는다 (DESIGN.md).
 // 원본: config/sources.yaml. 읽는 방법이 다른 4곳(Anthropic·HN·GitHub·arXiv)은 Gemini 조사(2026-11-14) 결과대로 바꿨다.
 // include / exclude: 제목에 거는 정규식, 대소문자 무시.
+// 즉시 알림 출처의 id: 주간 리포트 버튼이 가리키는 고정 이름 (순서를 바꿔도 지난 버튼이 다른 출처를 가리키지 않게). 바꾸지 말 것
 import { parseFeed } from "./feed.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 
 export const INSTANT = [
   // /news 페이지 앞 64KB에 최신 3~4건이 있다. 제목은 새 글일 때만 글 페이지에서 가져온다
-  { name: "Anthropic 공식 뉴스", type: "anthropic", url: "https://www.anthropic.com/news", max: 64 * 1024 },
-  { name: "OpenAI 공식 블로그", type: "feed", url: "https://openai.com/news/rss.xml" },
-  { name: "Google Gemini 블로그", type: "feed", url: "https://blog.google/products/gemini/rss/" },
-  { name: "Claude Code 릴리스", type: "feed", max: 32 * 1024, url: "https://github.com/anthropics/claude-code/releases.atom" },
-  { name: "Claude Agent SDK (Python) 릴리스", type: "feed", url: "https://github.com/anthropics/claude-agent-sdk-python/releases.atom" },
-  { name: "Claude Agent SDK (TypeScript) 릴리스", type: "feed", url: "https://github.com/anthropics/claude-agent-sdk-typescript/releases.atom" },
-  { name: "Codex 릴리스", type: "feed", url: "https://github.com/openai/codex/releases.atom", exclude: "-(alpha|beta|rc)" },
+  { id: "anthropic", name: "Anthropic 공식 뉴스", type: "anthropic", url: "https://www.anthropic.com/news", max: 64 * 1024 },
+  { id: "openai", name: "OpenAI 공식 블로그", type: "feed", url: "https://openai.com/news/rss.xml" },
+  { id: "gemini", name: "Google Gemini 블로그", type: "feed", url: "https://blog.google/products/gemini/rss/" },
+  { id: "claude-code", name: "Claude Code 릴리스", type: "feed", max: 32 * 1024, url: "https://github.com/anthropics/claude-code/releases.atom" },
+  { id: "sdk-py", name: "Claude Agent SDK (Python) 릴리스", type: "feed", url: "https://github.com/anthropics/claude-agent-sdk-python/releases.atom" },
+  { id: "sdk-ts", name: "Claude Agent SDK (TypeScript) 릴리스", type: "feed", url: "https://github.com/anthropics/claude-agent-sdk-typescript/releases.atom" },
+  { id: "codex", name: "Codex 릴리스", type: "feed", url: "https://github.com/openai/codex/releases.atom", exclude: "-(alpha|beta|rc)" },
 ].map((s) => ({ ...s, mode: "instant" }));
 
 export const DIGEST = [

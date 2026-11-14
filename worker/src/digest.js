@@ -27,7 +27,7 @@ function pinnedBlocks(pinned) {
   const blocks = [];
   for (const [kind, name] of PINNED) {
     const picked = pinned.filter((it) => it.kind === kind);
-    if (picked.length) blocks.push(`\n━ ${name} (${picked.length})`, ...picked.map((it, n) => `${n + 1}. ${link(it)}`));
+    if (picked.length) blocks.push(`\n━ ${name} (${picked.length})`, ...picked.map((it, n) => `${n + 1}. ${link(it, it.line?.slice(0, 200))}`));
   }
   return blocks;
 }
@@ -75,7 +75,7 @@ export async function prepare(env, now, persona = "", priorities = "") {
   }
   // 이 시각 이전에 들어온 것만: 정렬하는 동안(최대 60초) 새로 쌓인 글·핀은 지우지 않고 내일로 넘긴다
   const items = (await db.prepare("SELECT rowid, source, title, url FROM queue WHERE at < ? ORDER BY at").bind(at).all()).results;
-  const pinned = (await db.prepare("SELECT rowid, kind, source, title, url FROM pinned WHERE at < ? ORDER BY at").bind(at).all()).results;
+  const pinned = (await db.prepare("SELECT rowid, kind, source, title, url, line FROM pinned WHERE at < ? ORDER BY at").bind(at).all()).results;
   const ranks = await rank(env, items, persona, priorities);
   const batch = crypto.randomUUID().replace(/-/g, ""); // 추측할 수 없는 주소 (전체 목록 비밀 링크)
   const msgs = split(build(items, ranks, env.BASE_URL && `${env.BASE_URL}/digest/${batch}`, pinned));
@@ -98,7 +98,8 @@ export async function sendOutbox(env) {
   let { sent, tries } = box;
   while (sent < msgs.length) {
     try {
-      await tg(env, "sendMessage", { chat_id: env.TG_CHAT_ID, text: msgs[sent], parse_mode: "HTML", disable_web_page_preview: true });
+      const m = typeof msgs[sent] === "string" ? { text: msgs[sent] } : msgs[sent]; // 주간 리포트 조각은 {text, reply_markup}
+      await tg(env, "sendMessage", { chat_id: env.TG_CHAT_ID, ...m, parse_mode: "HTML", disable_web_page_preview: true });
       sent++;
       tries = 0;
     } catch (e) {
