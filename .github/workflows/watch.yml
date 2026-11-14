@@ -29,6 +29,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}   # 없으면 요약 없이 원문 첫 문장으로 보낸다
       - name: state 커밋 (저장소 활동 유지도 겸함)
         if: always() && steps.watch.outputs.saved == 'true'   # 상태를 끝까지 저장했을 때만 (보내기 실패로 끝났어도)
         run: |

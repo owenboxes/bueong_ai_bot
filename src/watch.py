@@ -16,6 +16,8 @@ from pathlib import Path
 
 import yaml
 
+from summary import summarize
+
 ROOT = Path(__file__).resolve().parent.parent
 SEEN = ROOT / "state" / "seen.json"
 QUEUE = ROOT / "state" / "queue.json"
@@ -33,20 +35,27 @@ def get(url):
 
 # ---------- 출처별 읽기: [{"id", "title", "url", "text"}] ----------
 
+def strip_html(text):
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", text or ""))).strip()
+
+
 def parse_feed(xml_text):
     root = ET.fromstring(xml_text)
     items = []
     for it in root.iter("item"):  # RSS
         link = (it.findtext("link") or "").strip()
         title = (it.findtext("title") or "").strip()
-        items.append({"id": (it.findtext("guid") or link).strip(), "title": title, "url": link, "text": title})
+        items.append({"id": (it.findtext("guid") or link).strip(), "title": title, "url": link, "text": title,
+                      "summary": strip_html(it.findtext("description"))})
     for e in root.iter(ATOM + "entry"):  # Atom
         link_el = e.find(ATOM + "link[@rel='alternate']")
         if link_el is None:
             link_el = e.find(ATOM + "link")
         link = link_el.get("href", "") if link_el is not None else ""
         title = (e.findtext(ATOM + "title") or "").strip()
-        items.append({"id": (e.findtext(ATOM + "id") or link).strip(), "title": title, "url": link, "text": title})
+        body = e.findtext(ATOM + "summary") or e.findtext(ATOM + "content")
+        items.append({"id": (e.findtext(ATOM + "id") or link).strip(), "title": title, "url": link, "text": title,
+                      "summary": strip_html(body)})
     return items
 
 
@@ -84,6 +93,8 @@ def fill_title(item):
         page = get(item["url"])
         m = re.search(r'<meta property="og:title" content="([^"]*)"', page) or re.search(r"<title>([^<]*)", page)
         item["title"] = html.unescape(m.group(1)).strip() if m else ""
+        d = re.search(r'<meta (?:name="description"|property="og:description") content="([^"]*)"', page)
+        item["summary"] = html.unescape(d.group(1)).strip() if d else ""
     except Exception as e:
         print(f"  제목 가져오기 실패 {item['url']}: {e}")
     if not item["title"]:
@@ -116,9 +127,12 @@ def is_quiet(now):
     return now.hour >= 23 or now.hour < 8  # 23:00~08:00 KST는 무음 전송
 
 
-def format_instant(src_name, item):
-    return (f"🦉 방금 포착했어요\n[{html.escape(src_name)}]\n<b>{html.escape(item['title'])}</b>\n\n"
-            f"<a href=\"{html.escape(item['url'], quote=True)}\">🔗 원문 보기</a>")
+def format_instant(src_name, item, lines=()):
+    summary = "".join(html.escape(l) + "\n" for l in lines)
+    title = item["title"] if len(item["title"]) <= 300 else item["title"][:300] + "…"  # 텔레그램 4,096자 보호
+    return (f"🦉 방금 포착했어요\n[{html.escape(src_name)}]\n<b>{html.escape(title)}</b>\n\n"
+            + (summary + "\n" if summary else "")
+            + f"<a href=\"{html.escape(item['url'], quote=True)}\">🔗 원문 보기</a>")
 
 
 def send_telegram(text, silent):
@@ -160,7 +174,7 @@ def process(src, items, seen, queue, send, now):
             fill_title(item)
         try:
             if src["mode"] == "instant":
-                send(format_instant(src["name"], item), is_quiet(now))
+                send(format_instant(src["name"], item, summarize(src["name"], item)), is_quiet(now))
             else:
                 queue.append({"source": src["name"], "title": item["title"], "url": item["url"],
                               "at": now.isoformat(timespec="minutes")})
