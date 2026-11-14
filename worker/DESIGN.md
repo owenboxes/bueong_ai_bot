@@ -46,7 +46,7 @@ seen, retry(재시도 시각), alerts(보낸 즉시 알림 35일), queue(아침 
 2. **webhook**: 👍👎🌙 버튼 즉시 응답, 링크 받기
 3. **아침 요약**: 정렬, 고정 구역(보낸 링크·🌙), outbox 이어 보내기, 전체 목록은 D1에 두고 Worker 주소로 보여주기 (공개 저장소에 올리지 않음)
 4. **주간 리포트** (기획서 5단계): 출처별 알림 수·반응률·반응 없는 출처·읽기 실패, 설정 변경 버튼
-5. **전환**: 시험용 봇으로 1~4 확인 → 운영 봇 webhook을 Worker로 → GitHub 워크플로 끄기 → GitHub `state/`는 보관만
+5. **전환**: 시험용 봇으로 1~4 확인 → 운영 봇 webhook을 Worker로 (setWebhook에 `allowed_updates=["message","callback_query"]`와 secret_token 필수. 빠뜨리면 버튼이 Worker에 안 온다: 시험판에서 실제로 겪음) → GitHub 워크플로 끄기 → GitHub `state/`는 보관만
 
 ## 역할
 | 누구 | 맡는 것 |

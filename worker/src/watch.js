@@ -135,7 +135,8 @@ export async function watch(env, now = new Date(), persona = "") {
           .bind(name, it.id, new Date(now.getTime() + RETRY_AFTER_MS).toISOString()).run();
       }
     }
-    done.push(db.prepare("DELETE FROM alerts WHERE at < ?").bind(new Date(now.getTime() - ALERT_DAYS * 86400_000).toISOString()));
+    const cutoff = new Date(now.getTime() - ALERT_DAYS * 86400_000).toISOString();
+    done.push(db.prepare("DELETE FROM alerts WHERE at < ?").bind(cutoff), db.prepare("DELETE FROM feedback WHERE at < ?").bind(cutoff));
   }
   done.push(db.prepare("INSERT INTO runs (at, source, received, bytes, items, new_items, failed) VALUES (?, ?, ?, ?, ?, ?, ?)")
     .bind(at, name, read.received, read.bytes, items.length, sent, failed));

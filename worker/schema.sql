@@ -11,3 +11,7 @@ CREATE TABLE IF NOT EXISTS alerts (key TEXT PRIMARY KEY, source TEXT NOT NULL, t
 CREATE TABLE IF NOT EXISTS queue (source TEXT NOT NULL, id TEXT NOT NULL, title TEXT, url TEXT, at TEXT NOT NULL, PRIMARY KEY (source, id));
 -- 출처별 연속 읽기 실패 (성공하면 행을 지운다)
 CREATE TABLE IF NOT EXISTS health (source TEXT PRIMARY KEY, fails INTEGER NOT NULL, last_error TEXT, at TEXT NOT NULL);
+-- 버튼 누름·보낸 메시지 (35일). update_id로 텔레그램 재전송을 한 번만 받는다. 주간 리포트가 읽는다
+CREATE TABLE IF NOT EXISTS feedback (update_id INTEGER PRIMARY KEY, key TEXT, action TEXT NOT NULL, source TEXT, at TEXT NOT NULL);
+-- 아침 요약 고정 구역: 보낸 링크(link)·🌙 자세히(later). 아침 요약이 보낸 뒤 지운다
+CREATE TABLE IF NOT EXISTS pinned (kind TEXT NOT NULL, url TEXT NOT NULL, title TEXT, source TEXT, at TEXT NOT NULL, PRIMARY KEY (kind, url));

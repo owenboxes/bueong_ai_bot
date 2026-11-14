@@ -1,27 +1,8 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
 import { watch, alertKey, formatInstant, isQuiet } from "../src/watch.js";
 import { pick, parse, INSTANT, DIGEST } from "../src/sources.js";
-
-// D1 흉내: node:sqlite 위에 prepare().bind().all/first/run 과 batch만
-function fakeD1() {
-  const db = new DatabaseSync(":memory:");
-  db.exec(readFileSync(new URL("../schema.sql", import.meta.url), "utf8"));
-  const stmt = (sql, args = []) => ({
-    bind: (...a) => stmt(sql, a),
-    all: async () => ({ results: db.prepare(sql).all(...args) }),
-    first: async () => db.prepare(sql).get(...args) ?? null,
-    run: async () => db.prepare(sql).run(...args),
-    exec: () => db.prepare(sql).run(...args),
-  });
-  return {
-    raw: db,
-    prepare: (sql) => stmt(sql),
-    batch: async (list) => { db.exec("BEGIN"); try { list.forEach((s) => s.exec()); db.exec("COMMIT"); } catch (e) { db.exec("ROLLBACK"); throw e; } },
-  };
-}
+import { fakeD1 } from "./d1.js";
 
 const rss = (...ids) => `<rss>${ids.map((i) => `<item><title>글 ${i}</title><link>https://x/${i}</link><guid>${i}</guid><description><![CDATA[<p>본문 ${i}. 둘째]]></description></item>`).join("")}</rss>`;
 const cycleStart = Math.floor(Date.UTC(2026, 10, 14, 1) / 660_000) * 660_000;
