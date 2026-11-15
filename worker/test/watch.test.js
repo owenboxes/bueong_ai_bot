@@ -131,7 +131,7 @@ test("유튜브: 키는 헤더로만, 리디렉션 금지, 실패 기록에 예�
   await watch(env, at(yt));
   assert.equal(init.headers["x-goog-api-key"], "SECRET");
   assert.equal(init.redirect, "error");
-  assert.deepEqual(rows("SELECT last_error FROM health").map((r) => r.last_error), ["요청 실패 (내용 숨김)"]);
+  assert.deepEqual(rows("SELECT last_error FROM health").map((r) => r.last_error), ["요청 실패 (TypeError)"]);
   globalThis.fetch = async () => new Response("", { status: 403 });
   await watch(env, at(yt + SLOTS.length)); // 다음 채널
   assert.ok(rows("SELECT last_error FROM health").some((r) => r.last_error === "HTTP 403"));

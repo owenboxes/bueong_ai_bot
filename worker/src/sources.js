@@ -29,7 +29,7 @@ export const INSTANT = [
       + "&fields=items(snippet(title,resourceId(videoId)))",
     headers: (env) => {
       if (!env?.YT_KEY) throw new Error("YT_KEY 없음");
-      return { "x-goog-api-key": env.YT_KEY };
+      return { "x-goog-api-key": env.YT_KEY.trim() }; // 붙여 넣을 때 섞인 줄바꿈·공백은 헤더 오류(TypeError)가 된다
     },
   })),
 ].map((s) => ({ ...s, mode: "instant" }));

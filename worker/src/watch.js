@@ -100,7 +100,8 @@ export async function watch(env, now = new Date(), persona = "") {
     items = parse(src, read.text, { unfiltered: true });
   } catch (e) { // 한 출처가 막혀도 다음 분에는 다른 출처를 읽는다. 연속 실패 수는 주간 리포트가 본다
     // 키 헤더를 쓰는 출처는 예외 원문에 키가 섞일 수 있어 정해진 문구만 남긴다
-    const error = !src.headers || /^(HTTP \d+|YT_KEY 없음)$/.test(e.message) ? e.message.slice(0, 200) : "요청 실패 (내용 숨김)";
+    // 우리 코드가 던진 고정 문구는 그대로, 그 밖은 예외 종류(TypeError 등)만
+    const error = !src.headers || /^(HTTP \d+|YT_KEY 없음|JSON 응답이 상한보다 큼|파싱 결과 0건)/.test(e.message) ? e.message.slice(0, 200) : `요청 실패 (${e.name})`;
     await db.prepare(`INSERT INTO health (source, fails, last_error, at) VALUES (?, 1, ?, ?)
       ON CONFLICT(source) DO UPDATE SET fails = fails + 1, last_error = excluded.last_error, at = excluded.at`)
       .bind(name, error, at).run();
