@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS pinned (kind TEXT NOT NULL, url TEXT NOT NULL, title 
 -- 아침 요약 발송분: 메시지 조각(JSON 배열)과 보낸 조각 수. 다 보내면 지운다
 CREATE TABLE IF NOT EXISTS outbox (batch TEXT PRIMARY KEY, messages TEXT NOT NULL, sent INTEGER NOT NULL, tries INTEGER NOT NULL, at TEXT NOT NULL);
 -- 아침 요약 전체 목록 페이지 (35일). 주소 /digest/<batch>는 추측할 수 없는 무작위 값이다
-CREATE TABLE IF NOT EXISTS digests (batch TEXT PRIMARY KEY, html TEXT NOT NULL, at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS digests (batch TEXT PRIMARY KEY, html TEXT NOT NULL, at TEXT NOT NULL, data TEXT);
+-- 이미 만든 DB에는 한 번만: ALTER TABLE digests ADD COLUMN data TEXT;  (목록 JSON {items, ranks}: 열 때마다 👍 표시를 넣어 그린다, 2026-11-15)
+-- 아침 요약 페이지에서 👍 누른 글 (batch의 i번째). 페이지와 같이 35일
+CREATE TABLE IF NOT EXISTS likes (batch TEXT NOT NULL, i INTEGER NOT NULL, at TEXT NOT NULL, PRIMARY KEY (batch, i));
 -- 출처별 설정 바꾸기 (주간 리포트 버튼). 없으면 sources.js 기본값
 CREATE TABLE IF NOT EXISTS settings (source TEXT PRIMARY KEY, mode TEXT NOT NULL, at TEXT NOT NULL);

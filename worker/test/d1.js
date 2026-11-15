@@ -9,7 +9,7 @@ export function fakeD1() {
     bind: (...a) => stmt(sql, a),
     all: async () => ({ results: db.prepare(sql).all(...args) }),
     first: async () => db.prepare(sql).get(...args) ?? null,
-    run: async () => db.prepare(sql).run(...args),
+    run: async () => ({ meta: db.prepare(sql).run(...args) }), // D1처럼 { meta: { changes } }
     exec: () => db.prepare(sql).run(...args),
   });
   return {

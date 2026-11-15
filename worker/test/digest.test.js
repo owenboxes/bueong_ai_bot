@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { build, split, prepare, sendOutbox, digestPage } from "../src/digest.js";
+import { build, split, prepare, sendOutbox, digestPage, likeDigest } from "../src/digest.js";
 import { fakeD1 } from "./d1.js";
 
 const it = (n, source = "GeekNews") => ({ source, title: `글 ${n}`, url: `https://x/${n}` });
@@ -102,11 +102,34 @@ test("sendOutbox: 같은 조각이 5번 실패하면 건너뛰고 나머지를 �
 });
 
 test("전체 목록 페이지: 있는 batch만, 비밀 링크가 새지 않게 헤더", async () => {
-  put("INSERT INTO digests VALUES (?, '<p>목록</p>', '2026-11-14T23:00:00Z')", "a".repeat(32));
+  put("INSERT INTO digests (batch, html, at) VALUES (?, '<p>목록</p>', '2026-11-14T23:00:00Z')", "a".repeat(32)); // 옛 행(data 없음)은 저장된 html 그대로
   const r = await digestPage(env, "a".repeat(32));
   assert.equal(await r.text(), "<p>목록</p>");
   assert.equal(r.headers.get("referrer-policy"), "no-referrer");
   assert.match(r.headers.get("content-security-policy"), /default-src 'none'/);
   assert.equal((await digestPage(env, "b".repeat(32))).status, 404);
   assert.equal((await digestPage(env, "' OR 1=1 --")).status, 404);
+});
+
+test("아침 요약 페이지 👍: 한 번만 기록·시트로, 페이지로 돌아가고, 없는 글·주소는 404", async () => {
+  const b = "c".repeat(32), jobs = [];
+  put("INSERT INTO digests (batch, html, at, data) VALUES (?, '', '2026-11-14T23:00:00Z', ?)", b,
+    JSON.stringify({ items: [{ source: "GeekNews", title: "글", url: "https://x/1" }], ranks: null }));
+  const posts = [], realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { posts.push(JSON.parse(init.body)); return new Response("ok"); };
+  try {
+    const env2 = { ...env, SHEET_URL: "https://sheet", SHEET_TOKEN: "t" };
+    const r = await likeDigest(env2, b, "0", new Date("2026-11-15T00:00:00Z"), (p) => jobs.push(p));
+    assert.equal(r.status, 303);
+    assert.equal(r.headers.get("location"), `/digest/${b}#i0`);
+    await likeDigest(env2, b, "0", new Date(), (p) => jobs.push(p)); // 두 번 눌러도
+    await Promise.all(jobs);
+    assert.deepEqual(rows("SELECT batch, i FROM likes"), [{ batch: b, i: 0 }]);
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].kind, "아침 요약");
+  } finally { globalThis.fetch = realFetch; }
+  assert.equal((await likeDigest(env, b, "1")).status, 404);
+  assert.equal((await likeDigest(env, "x", "0")).status, 404);
+  assert.equal((await likeDigest(env, b, "-1")).status, 404);
+  assert.match((await digestPage(env, b)).headers.get("content-security-policy"), /form-action 'self'/);
 });

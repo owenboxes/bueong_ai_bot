@@ -5,6 +5,7 @@
 import { rank } from "./gemini.js";
 import { renderList, safeHttpUrl } from "./page.js";
 import { tg } from "./telegram.js";
+import { toSheet } from "./sheet.js";
 
 const TG_LIMIT = 4000; // 텔레그램 한도 4,096자보다 조금 여유
 const TITLE_MAX = 100, URL_MAX = 500; // 블록 하나가 TG_LIMIT를 넘지 않게 하는 상한 (요약 줄은 gemini.js가 200자로 자른다)
@@ -81,10 +82,12 @@ export async function prepare(env, now, persona = "", priorities = "") {
   const msgs = split(build(items, ranks, env.BASE_URL && `${env.BASE_URL}/digest/${batch}`, pinned));
   await db.batch([ // 한 트랜잭션: 발송분이 생기면 대기열이 비고, 실패하면 아무것도 바뀌지 않는다
     db.prepare("INSERT INTO outbox (batch, messages, sent, tries, at) VALUES (?, ?, 0, 0, ?)").bind(batch, JSON.stringify(msgs), at),
-    ...(items.length ? [db.prepare("INSERT INTO digests (batch, html, at) VALUES (?, ?, ?)").bind(batch, renderList(items, ranks, batch), at)] : []),
+    ...(items.length ? [db.prepare("INSERT INTO digests (batch, html, at, data) VALUES (?, ?, ?, ?)")
+      .bind(batch, renderList(items, ranks, batch), at, JSON.stringify({ items: items.map(({ source, title, url }) => ({ source, title, url })), ranks }))] : []),
     db.prepare("DELETE FROM queue WHERE at < ? AND rowid IN (SELECT value FROM json_each(?))").bind(at, JSON.stringify(items.map((it) => it.rowid))),
     db.prepare("DELETE FROM pinned WHERE at < ? AND rowid IN (SELECT value FROM json_each(?))").bind(at, JSON.stringify(pinned.map((it) => it.rowid))),
     db.prepare("DELETE FROM digests WHERE at < ?").bind(new Date(now.getTime() - KEEP_DAYS * 86400_000).toISOString()),
+    db.prepare("DELETE FROM likes WHERE at < ?").bind(new Date(now.getTime() - KEEP_DAYS * 86400_000).toISOString()),
   ]);
   console.log(JSON.stringify({ event: "digest_prepared", items: items.length, pinned: pinned.length, ranked: !!ranks, messages: msgs.length }));
 }
@@ -114,13 +117,33 @@ export async function sendOutbox(env) {
   if (sent >= msgs.length) await db.prepare("DELETE FROM outbox WHERE batch = ?").bind(box.batch).run();
 }
 
-/** GET /digest/<batch>: 전체 목록 페이지. 없는 주소는 404 */
+const BATCH_RE = /^[0-9a-f]{32}$/;
+
+/** GET /digest/<batch>: 전체 목록 페이지. 없는 주소는 404. 목록 JSON이 있으면 👍 버튼·표시를 넣어 그때 그린다 */
 export async function digestPage(env, batch) {
-  const row = /^[0-9a-f]{32}$/.test(batch) && await env.DB.prepare("SELECT html FROM digests WHERE batch = ?").bind(batch).first();
+  const db = env.DB;
+  const row = BATCH_RE.test(batch) && await db.prepare("SELECT html, data FROM digests WHERE batch = ?").bind(batch).first();
   if (!row) return new Response("not found", { status: 404 });
-  return new Response(row.html, { headers: {
+  let html = row.html;
+  if (row.data) {
+    const { items, ranks } = JSON.parse(row.data);
+    const liked = new Set((await db.prepare("SELECT i FROM likes WHERE batch = ?").bind(batch).all()).results.map((r) => r.i));
+    html = renderList(items, ranks, batch, { likeAction: (i) => `/digest/${batch}/like/${i}`, liked });
+  }
+  return new Response(html, { headers: {
     "content-type": "text/html; charset=utf-8", "cache-control": "private, no-store",
     "x-robots-tag": "noindex", "referrer-policy": "no-referrer", // 비밀 링크가 검색·다른 사이트로 새지 않게
-    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'",
+    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'", // 👍는 스크립트 없이 form POST
   } });
+}
+
+/** POST /digest/<batch>/like/<i>: 그 글을 👍로 기록하고 시트에도 보낸 뒤 페이지로 돌려보낸다. 비밀 링크를 아는 사람만 누를 수 있다 */
+export async function likeDigest(env, batch, i, now = new Date(), later) {
+  const db = env.DB, at = now.toISOString(), n = Number(i);
+  const row = BATCH_RE.test(batch) && /^\d{1,4}$/.test(i) && await db.prepare("SELECT data FROM digests WHERE batch = ?").bind(batch).first();
+  const it = row?.data && JSON.parse(row.data).items[n];
+  if (!it) return new Response("not found", { status: 404 });
+  const { meta } = await db.prepare("INSERT OR IGNORE INTO likes (batch, i, at) VALUES (?, ?, ?)").bind(batch, n, at).run();
+  if (meta.changes && later) later(toSheet(env, { key: `d:${batch}:${n}`, at, source: it.source, title: it.title, url: it.url, kind: "아침 요약" }));
+  return new Response(null, { status: 303, headers: { location: `/digest/${batch}#i${n}`, "cache-control": "no-store" } });
 }
