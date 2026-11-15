@@ -1,6 +1,6 @@
 // 2단계 webhook: 텔레그램 입력(버튼 누름, 내가 보낸 링크)을 받는 즉시 D1에 기록하고 답한다.
 // 규칙 원본: src/inbox.py.
-// - 👍/👎 → feedback (주간 리포트용)
+// - 👍/👎 → feedback (주간 리포트용), 👍는 구글 시트에도 (sheet.js)
 // - 🌙 아침에 자세히 → pinned에 later로 (다음 아침 요약 고정 구역)
 // - 링크를 보내면 → pinned에 link로, 받았다고 답한다 (보낸 주소는 열어보지 않는다)
 // - 주간 리포트 「그렇게 해줘」(w:출처 id) → settings에 그 출처를 아침 요약으로, 「그대로 둬」(k:출처 id) → 답만
@@ -8,6 +8,7 @@
 import { isQuiet } from "./watch.js";
 import { enrichLink } from "./links.js";
 import { ALL } from "./sources.js";
+import { toSheet } from "./sheet.js";
 
 const URL_RE = /https?:\/\/[^\s<>"']+/g;
 const MAX_LINKS = 5; // 메시지 하나에서 받을 링크 수 상한
@@ -53,6 +54,7 @@ export async function handleUpdate(update, env, now = new Date(), { later, perso
     const info = await db.prepare("SELECT source, title, url FROM alerts WHERE key = ?").bind(key).first();
     if (!info) return { method: "answerCallbackQuery", callback_query_id: cq.id, text: EXPIRED }; // 오래돼 지워졌거나 모르는 알림
     await db.batch([...(action === "l" ? [pin("later", info.source, info.title, info.url)] : []), feedback(key, action, info.source)]);
+    if (action === "u" && later) later(toSheet(env, { key, at, source: info.source, title: info.title, url: info.url, kind: "즉시 알림" })); // 답 뒤에 시트로
     return { method: "answerCallbackQuery", callback_query_id: cq.id, text: ANSWERS[action] };
   }
   const msg = update.message;

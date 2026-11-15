@@ -1,3 +1,5 @@
 node_modules/
 .wrangler/
 .dev.vars
+.sheet_token
+.sheet_url

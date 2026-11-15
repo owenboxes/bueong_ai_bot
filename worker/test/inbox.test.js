@@ -25,6 +25,24 @@ test("👍·🌙 버튼: 기록하고 바로 답한다, 🌙은 고정 구역에
   assert.deepEqual(rows("SELECT kind, url, title FROM pinned"), [{ kind: "later", url: "https://x/1", title: "글" }]);
 });
 
+test("👍만 구글 시트로 보낸다 (비밀 문구와 함께, 실패해도 답은 그대로)", async () => {
+  const posts = [], realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { posts.push(JSON.parse(init.body)); return new Response("ok"); };
+  try {
+    const jobs = [], sheetEnv = { ...env, SHEET_URL: "https://sheet", SHEET_TOKEN: "t" };
+    await handleUpdate(press("u:k1"), sheetEnv, NOON, { later: (p) => jobs.push(p) });
+    await handleUpdate(press("d:k1", 11), sheetEnv, NOON, { later: (p) => jobs.push(p) });
+    await Promise.all(jobs);
+    assert.deepEqual(posts, [{ token: "t", key: "k1", at: NOON.toISOString(), source: "OpenAI 공식 블로그", title: "글", url: "https://x/1", kind: "즉시 알림" }]);
+    globalThis.fetch = async () => { throw new TypeError("x"); };
+    const r = await handleUpdate(press("u:k1", 12), sheetEnv, NOON, { later: (p) => jobs.push(p) });
+    await Promise.all(jobs);
+    assert.equal(r.text, "👍 기록했어요");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test("같은 update가 다시 와도 한 번만 기록한다 (텔레그램 재전송)", async () => {
   await handleUpdate(press("l:k1"), env, NOON);
   await handleUpdate(press("l:k1"), env, NOON);
