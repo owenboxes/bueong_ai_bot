@@ -27,7 +27,7 @@ beforeEach(() => {
   put("INSERT INTO alerts VALUES ('old', ?, 't', 'u', ?)", CODEX, OLD);
   put("INSERT INTO feedback VALUES (1, 'c1', 'u', ?, ?)", CC, DAY_AGO);
   put("INSERT INTO feedback VALUES (2, 'c1', 'l', ?, ?)", CC, DAY_AGO); // 같은 알림에 두 번 반응해도 반응 1건
-  for (const src of [...INSTANT, ...DIGEST]) if (src.name !== "arXiv 에이전트 논문") put("INSERT INTO runs VALUES (?, ?, 0, 0, 1, ?, 0)", DAY_AGO, src.name, src.name === "GeekNews" ? 7 : 0);
+  for (const src of [...INSTANT, ...DIGEST]) if (src.name !== "arXiv 에이전트 논문") put("INSERT INTO runs VALUES (?, ?, 0, 0, 1, ?, 0)", DAY_AGO, src.name, { GeekNews: 7, [CC]: 2, [CODEX]: 3 }[src.name] || 0); // new_items = 알림 + 대기열
   put("INSERT INTO runs VALUES (?, 'GeekNews', 0, 0, 1, 99, 0)", OLD);
   put("INSERT INTO health VALUES ('GitHub 트렌딩', 4, 'HTTP 403', ?)", DAY_AGO);
 });

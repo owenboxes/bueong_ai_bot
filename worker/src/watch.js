@@ -6,6 +6,7 @@ import { summarize } from "./gemini.js";
 import { tg } from "./telegram.js";
 
 export const UA = "Mozilla/5.0 (compatible; bueong-bot/0.1)";
+const SUMMARY_BODY = 2000;
 const MAX_SEND = 3; // 한 번에 보내기를 시도할 즉시 알림 수 (Gemini 호출도 그만큼)
 const FEED_TIMEOUT_MS = 10_000;
 const RETRY_AFTER_MS = 60 * 60 * 1000; // 실패한 글은 1시간 뒤에 다시 시도
@@ -90,7 +91,10 @@ export async function watch(env, now = new Date(), persona = "") {
   const db = env.DB, at = now.toISOString();
   const base = pick(now);
   const setting = await db.prepare("SELECT mode FROM settings WHERE source = ?").bind(base.name).first(); // 주간 리포트 버튼으로 바꾼 설정
-  const src = setting ? { ...base, mode: setting.mode } : base, name = src.name;
+  // 08~23시 KST는 모든 출처를 즉시 알림, 23~08시는 알림 없이 모아서 아침 요약으로 (사용자 결정 2026-11-15).
+  // 주간 리포트 버튼으로 "아침 요약으로" 옮긴 출처는 낮에도 아침 요약
+  const mode = setting?.mode === "digest" || isQuiet(now) ? "digest" : "instant";
+  const src = { ...base, mode }, name = src.name;
   let read, items;
   try {
     const max = src.max || MAX_BYTES;
@@ -119,6 +123,7 @@ export async function watch(env, now = new Date(), persona = "") {
   const fresh = items.filter((i) => !known.has(i.id) && !waiting.has(i.id)); // 재시도 대기 중인 글은 이번엔 건너뛴다
 
   const record = (it) => db.prepare("INSERT OR IGNORE INTO seen (source, id, at) VALUES (?, ?, ?)").bind(name, it.id, at);
+  const queue = (it) => db.prepare("INSERT OR IGNORE INTO queue (source, id, title, url, at) VALUES (?, ?, ?, ?, ?)").bind(name, it.id, it.title, it.url, at);
   const unretry = (it) => db.prepare("DELETE FROM retry WHERE source = ? AND id = ?").bind(name, it.id);
   const done = [db.prepare("DELETE FROM health WHERE source = ?").bind(name)];
   let sent = 0, failed = 0;
@@ -126,16 +131,19 @@ export async function watch(env, now = new Date(), persona = "") {
   if (first) done.push(...fresh.map(record)); // 처음 본 출처: 보내지 않고 기록만 (첫 실행 폭탄 방지)
   else if (src.mode === "digest") { // 대기열과 seen을 한 batch로: 둘 중 하나만 남는 일이 없다
     for (const it of fresh) {
-      done.push(record(it), unretry(it), db.prepare("INSERT OR IGNORE INTO queue (source, id, title, url, at) VALUES (?, ?, ?, ?, ?)")
-        .bind(name, it.id, it.title, it.url, at));
+      done.push(record(it), unretry(it), queue(it));
     }
     sent = fresh.length;
   } else {
     // 시도 기준 상한: 실패도 한 번으로 센다. 한도를 넘은 새 글과 실패한 글은 기록하지 않아 다음 차례에 다시 시도한다
+    // 한도를 넘은 새 글은 아침 요약 대기열로 (다음 차례에 피드에서 밀려나 사라지지 않게)
+    for (const it of fresh.slice(MAX_SEND)) done.push(record(it), unretry(it), queue(it));
+    sent = Math.max(0, fresh.length - MAX_SEND); // runs.new_items = 알림 + 대기열 (주간 리포트가 둘을 나눠 센다)
     for (const it of fresh.slice(0, MAX_SEND)) {
       try {
         if (!it.title) await fillTitle(it);
-        const lines = src.type === "youtube" ? [] : await summarize(env, name, { ...it, summary: stripHtml(it.summary) }, persona); // 영상은 제목만
+        // 요약은 공식 출처만, 본문은 앞 2,000자 (토큰 대부분이 읽히는 본문이라 2026-11-15 6,000→2,000)
+        const lines = src.summarize ? await summarize(env, name, { ...it, summary: stripHtml(it.summary).slice(0, SUMMARY_BODY) }, persona) : [];
         const key = await alertKey(name, it.id);
         await tg(env, "sendMessage", {
           chat_id: env.TG_CHAT_ID, parse_mode: "HTML", disable_web_page_preview: true,

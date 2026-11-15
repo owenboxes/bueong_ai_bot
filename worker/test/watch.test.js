@@ -72,22 +72,42 @@ test("보내기 실패한 글은 기록하지 않고 1시간 뒤 다시 시도�
   assert.equal(rows("SELECT * FROM seen WHERE id = 'b'").length, 1);
 });
 
-test("한 번에 3건까지만 시도하고 나머지는 다음 차례에", async () => {
+test("한 번에 3건까지만 알리고 넘친 글은 잃지 않게 아침 요약 대기열로", async () => {
   await watch(env, at(OPENAI));
   feed = rss("1", "2", "3", "4", "5", "a");
   await watch(env, at(OPENAI));
   assert.equal(sent.length, 3);
+  assert.deepEqual(rows("SELECT id FROM queue ORDER BY id").map((r) => r.id), ["4", "5"]);
+  assert.equal(rows("SELECT new_items FROM runs").at(-1).new_items, 5);
   await watch(env, at(OPENAI));
-  assert.equal(sent.length, 5);
+  assert.equal(sent.length, 3);
 });
 
-test("아침 요약 출처는 보내지 않고 대기열에 쌓는다", async () => {
-  await watch(env, at(1)); // GeekNews
+test("23~08시 KST는 모든 출처를 알림 없이 대기열에, 낮에는 아침 요약 출처도 즉시 알림", async () => {
+  const night = (m) => new Date(Math.floor(Date.UTC(2026, 10, 14, 15) / CYCLE) * CYCLE + m * 60_000); // 00시 전후 KST
+  await watch(env, night(1)); // GeekNews 첫 실행
+  await watch(env, night(OPENAI));
   feed = rss("b", "a");
-  await watch(env, at(1));
+  await watch(env, night(1));
+  await watch(env, night(OPENAI)); // 즉시 알림 출처도 밤에는 대기열
   assert.equal(sent.length, 0);
-  assert.deepEqual(rows("SELECT source, id FROM queue").map((r) => ({ ...r })), [{ source: "GeekNews", id: "b" }]);
-  await watch(env, at(1));
+  assert.deepEqual(rows("SELECT source, id FROM queue ORDER BY source").map((r) => ({ ...r })),
+    [{ source: "GeekNews", id: "b" }, { source: "OpenAI 공식 블로그", id: "b" }]);
+  await watch(env, night(1));
+  assert.equal(rows("SELECT * FROM queue").length, 2);
+  feed = rss("c", "b", "a");
+  await watch(env, at(1)); // 낮: GeekNews도 바로 보낸다
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /\[GeekNews\]/);
+  assert.doesNotMatch(sent[0].text, /본문 c/); // 뉴스 출처는 요약 없이 제목·링크만
+});
+
+test("주간 리포트로 아침 요약에 옮긴 출처는 낮에도 대기열", async () => {
+  await watch(env, at(OPENAI));
+  env.DB.raw.prepare("INSERT INTO settings VALUES ('OpenAI 공식 블로그', 'digest', '2026-11-14T00:00:00Z')").run();
+  feed = rss("b", "a");
+  await watch(env, at(OPENAI));
+  assert.equal(sent.length, 0);
   assert.equal(rows("SELECT * FROM queue").length, 1);
 });
 

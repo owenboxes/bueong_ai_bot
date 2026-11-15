@@ -32,30 +32,33 @@ export const INSTANT = [
       return { "x-goog-api-key": env.YT_KEY.trim() }; // 붙여 넣을 때 섞인 줄바꿈·공백은 헤더 오류(TypeError)가 된다
     },
   })),
-].map((s) => ({ ...s, mode: "instant" }));
+].map((s) => ({ summarize: s.type !== "youtube", ...s, mode: "instant" })); // 요약은 공식 7곳만 (릴리스 제목은 버전뿐이라), 나머지는 제목·링크
 
 export const DIGEST = [
   {
-    name: "Hacker News", type: "hn", max: 32 * 1024,
+    id: "hn", name: "Hacker News", type: "hn", max: 32 * 1024,
     url: "https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=points%3E20&hitsPerPage=50&attributesToRetrieve=title,url",
     include: "\\b(ai|llms?|gpt|claude|gemini|agents?|agentic|mcp|codex|anthropic|openai)\\b",
   },
-  { name: "GeekNews", type: "feed", url: "https://news.hada.io/rss/news" },
+  { id: "geeknews", name: "GeekNews", type: "feed", url: "https://news.hada.io/rss/news" },
   {
     // 트렌딩 페이지는 너무 커서, 최근 7일에 생긴 agent 저장소를 별 순으로 5개 (Search API, User-Agent 필수)
-    name: "GitHub 트렌딩", type: "github", max: 64 * 1024,
+    id: "github", name: "GitHub 트렌딩", type: "github", max: 64 * 1024,
     url: (now) => `https://api.github.com/search/repositories?q=agent+in:name,description,topics+created:%3E${new Date(now - 7 * DAY).toISOString().slice(0, 10)}&sort=stars&order=desc&per_page=5`,
   },
   {
     // 429가 나면 다시 시도하지 않고 다음 순번(1시간 뒤)에 읽는다
-    name: "arXiv 에이전트 논문", type: "feed", max: 32 * 1024,
+    id: "arxiv", name: "arXiv 에이전트 논문", type: "feed", max: 32 * 1024,
     url: "https://export.arxiv.org/api/query?search_query=ti:agent&sortBy=submittedDate&sortOrder=descending&max_results=10",
   },
   // 국내 출처 (Gemini 조사 2026-11-15): 앞 16KB에 AI타임스 16건, PyTorch KR 9건
-  { name: "AI타임스", type: "feed", url: "https://www.aitimes.com/rss/allArticle.xml" },
+  { id: "aitimes", name: "AI타임스", type: "feed", url: "https://www.aitimes.com/rss/allArticle.xml" },
   // Discourse latest.json은 앞 16KB에서 잘리므로 topics 안의 완성된 글 객체만 하나씩 읽는다 (topics 함수)
-  { name: "PyTorch KR", type: "discourse", url: "https://discuss.pytorch.kr/latest.json" },
+  { id: "pytorchkr", name: "PyTorch KR", type: "discourse", url: "https://discuss.pytorch.kr/latest.json" },
 ].map((s) => ({ ...s, mode: "digest" }));
+
+// 모든 출처 (낮에는 아침 요약 출처도 즉시 알림이라 주간 리포트 버튼은 전체에서 고른다. id는 바꾸지 말 것)
+export const ALL = [...INSTANT, ...DIGEST];
 
 // 순환 칸: 출처 하나가 한 칸, 같은 group은 한 칸을 차례로 나눠 쓴다
 export const SLOTS = [];

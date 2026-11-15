@@ -2,7 +2,7 @@
 // 지난 7일 D1 기록으로 출처별 알림 수·반응률·가장 유용했던 출처·반응 없던 출처·읽기 실패를 보내고,
 // 반응 없던 즉시 알림 출처에는 「아침 요약으로 돌리기」 버튼을 붙인다 (누르면 settings에 기록, watch.js가 읽는다).
 // 보내기는 아침 요약과 같은 outbox로: 실패해도 매분 cron이 이어 보낸다.
-import { INSTANT, DIGEST } from "./sources.js";
+import { ALL } from "./sources.js";
 
 const WEEK = 7 * 86400_000;
 const KEEP_DAYS = 35; // runs(매분 1행) 보관 기간
@@ -31,18 +31,17 @@ export function report(s, modes = new Map()) {
   const sum = (m) => [...m.values()].reduce((a, b) => a + (b || 0), 0);
   const total = sum(s.alerts), reacted = sum(s.reacted);
   const lines = ["🦉 이번 주 부엉 리포트", `즉시 알림 ${total}건 · 반응 ${reacted}건 (${total ? Math.round((reacted / total) * 100) : 0}%)`];
-  // shortcut: 지금 설정 기준으로 센다 (이번 주 중간에 아침 요약으로 돌린 출처는 돌리기 전 건수도 여기 들어간다), runs에 처리 방식을 남기면 정확해진다
-  const digestSources = [...DIGEST, ...INSTANT.filter((src) => modes.get(src.name) === "digest")];
-  const digestItems = digestSources.reduce((a, src) => a + (s.items.get(src.name) || 0), 0);
+  // runs.new_items = 보낸 알림 수 + 대기열에 넣은 수 → 전체에서 알림 수를 빼면 대기열 건수 (출처의 처리 방식과 무관)
+  const digestItems = Math.max(0, sum(s.items) - total);
   lines.push(`아침 요약에 쌓인 글 ${digestItems}건`);
   const best = [...s.ups].sort((a, b) => b[1] - a[1])[0];
   if (best) lines.push(`가장 유용했던 출처: ${esc(best[0])} (👍 ${best[1]})`);
-  const silent = INSTANT.filter((src) => (modes.get(src.name) || src.mode) === "instant"
+  const silent = ALL.filter((src) => modes.get(src.name) !== "digest"
     && (s.alerts.get(src.name) || 0) >= MIN_ALERTS && !s.reacted.get(src.name));
   if (silent.length) lines.push(`반응이 없던 출처: ${silent.map((src) => esc(src.name)).join(", ")}`);
   const failing = s.health.map((h) => `• ${esc(h.source)} 연속 ${h.fails}회 (${esc(h.last_error || "")})`);
   // 한 번도 성공 기록이 없는 출처: 읽기 실패뿐 아니라 CPU 한도로 끊겨 아무 기록도 못 남긴 경우도 여기서 드러난다
-  const dead = [...INSTANT, ...DIGEST].filter((src) => !s.runs.get(src.name) && !s.health.some((h) => h.source === src.name));
+  const dead = ALL.filter((src) => !s.runs.get(src.name) && !s.health.some((h) => h.source === src.name));
   if (failing.length || dead.length) {
     lines.push("", "읽기 문제가 있는 출처:", ...failing, ...dead.map((src) => `• ${esc(src.name)}: 이번 주 성공 기록 없음`));
   }

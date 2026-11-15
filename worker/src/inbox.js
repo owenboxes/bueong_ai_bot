@@ -7,7 +7,7 @@
 // 답은 webhook 응답 본문에 Bot API 호출로 담아 돌려준다 (따로 fetch하지 않아 빠르고 외부 요청이 줄어든다).
 import { isQuiet } from "./watch.js";
 import { enrichLink } from "./links.js";
-import { INSTANT } from "./sources.js";
+import { ALL } from "./sources.js";
 
 const URL_RE = /https?:\/\/[^\s<>"']+/g;
 const MAX_LINKS = 5; // 메시지 하나에서 받을 링크 수 상한
@@ -68,7 +68,7 @@ export async function handleUpdate(update, env, now = new Date(), { later, perso
 }
 
 async function weeklyAnswer(db, cq, action, key, at) {
-  const src = INSTANT.find((s) => s.id === key);
+  const src = ALL.find((s) => s.id === key);
   if (!src) return { method: "answerCallbackQuery", callback_query_id: cq.id, text: EXPIRED };
   if (action === "k") return { method: "answerCallbackQuery", callback_query_id: cq.id, text: "그대로 둘게요" };
   await db.prepare("INSERT OR REPLACE INTO settings (source, mode, at) VALUES (?, 'digest', ?)").bind(src.name, at).run(); // 다시 눌러도 같은 결과
