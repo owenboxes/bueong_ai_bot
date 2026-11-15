@@ -11,7 +11,8 @@ export async function toSheet(env, row) {
       body: JSON.stringify({ token: env.SHEET_TOKEN, ...row }), signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     const text = (await res.text()).slice(0, 10);
-    if (!["ok", "dup"].includes(text)) console.log(JSON.stringify({ event: "sheet_failed", status: res.status, reply: text }));
+    // 응답 원문은 남기지 않는다: 시트 스크립트의 고정 답(no·bad)만, 그 밖은 "unexpected"
+    if (!["ok", "dup"].includes(text)) console.log(JSON.stringify({ event: "sheet_failed", status: res.status, reply: ["no", "bad"].includes(text) ? text : "unexpected" }));
   } catch (e) {
     console.log(JSON.stringify({ event: "sheet_failed", error: e.name })); // 원문엔 주소가 섞일 수 있어 종류만
   }
