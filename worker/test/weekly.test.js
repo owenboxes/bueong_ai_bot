@@ -80,7 +80,7 @@ test("「그렇게 해줘」를 누르면 그 출처의 새 글이 즉시 알림
   assert.match((await handleUpdate(press("w:999", 52), env)).text, /오래된 알림/);
   assert.match((await handleUpdate(press("w:__proto__", 53), env)).text, /오래된 알림/);
 
-  const turn = new Date(Math.ceil(SUN.getTime() / 660_000) * 660_000 + (DIGEST.length + turnIndex) * 60_000); // OpenAI 차례인 분
+  const turn = new Date(Math.ceil(SUN.getTime() / 780_000) * 780_000 + (DIGEST.length + turnIndex) * 60_000); // OpenAI 차례인 분
   put("INSERT INTO seen VALUES ('OpenAI 공식 블로그', 'a', ?)", DAY_AGO);
   await watch(env, turn);
   assert.equal(sent.length, 0);

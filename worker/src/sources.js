@@ -34,11 +34,15 @@ export const DIGEST = [
     name: "arXiv 에이전트 논문", type: "feed", max: 32 * 1024,
     url: "https://export.arxiv.org/api/query?search_query=ti:agent&sortBy=submittedDate&sortOrder=descending&max_results=10",
   },
+  // 국내 출처 (Gemini 조사 2026-11-15): 앞 16KB에 AI타임스 16건, PyTorch KR 9건
+  { name: "AI타임스", type: "feed", url: "https://www.aitimes.com/rss/allArticle.xml" },
+  // Discourse latest.json은 앞 16KB에서 잘리므로 topics 안의 완성된 글 객체만 하나씩 읽는다 (topics 함수)
+  { name: "PyTorch KR", type: "discourse", url: "https://discuss.pytorch.kr/latest.json" },
 ].map((s) => ({ ...s, mode: "digest" }));
 
 const SOURCES = [...DIGEST, ...INSTANT];
 
-// 매분 한 출처씩 11분 주기로 균등 순환한다 (운영판도 같음). 정각에도 순번을 이어간다.
+// 매분 한 출처씩 13분 주기로 균등 순환한다 (운영판도 같음). 정각에도 순번을 이어간다.
 export const pick = (now) => SOURCES[Math.floor(now.getTime() / 60_000) % SOURCES.length];
 
 /** 응답 본문을 [{id, title, url, summary}]로. 늘 글이 있는 출처라 0건이면 구조가 바뀐 것으로 본다 */
@@ -58,10 +62,32 @@ export function parse(src, text, { unfiltered = false } = {}) {
       id: r.full_name, title: r.description ? `${r.full_name} — ${r.description}` : r.full_name,
       url: r.html_url, summary: r.description || "",
     }));
+  } else if (src.type === "discourse") {
+    const base = new URL(src.url).origin;
+    items = topics(text).map((t) => ({ id: String(t.id), title: t.title || "", url: `${base}/t/${t.slug}/${t.id}`, summary: "" }));
   } else throw new Error(`모르는 type: ${src.type}`);
   if (!items.length) throw new Error("파싱 결과 0건 (구조 변경 의심)");
   if (unfiltered) return items;
   return filterTitles(src, items);
+}
+
+/** 잘린 Discourse JSON에서 "topics":[ 안의 끝까지 온 글 객체만 하나씩 JSON.parse (속성 순서와 무관) */
+function topics(text) {
+  const m = /"topic_list"\s*:\s*\{[^]*?"topics"\s*:\s*\[/.exec(text);
+  if (!m) return [];
+  const out = [];
+  let depth = 0, from = -1, str = false;
+  for (let i = m.index + m[0].length; i < text.length; i++) {
+    const c = text[i];
+    if (str) { if (c === "\\") i++; else if (c === '"') str = false; continue; }
+    if (c === '"') str = true;
+    else if (c === "{" || c === "[") { if (depth++ === 0) from = i; }
+    else if (c === "}" || c === "]") {
+      if (depth === 0) break; // topics 배열 끝
+      if (--depth === 0) out.push(JSON.parse(text.slice(from, i + 1)));
+    }
+  }
+  return out.filter((t) => t.id && t.slug);
 }
 
 export function filterTitles(src, items) {

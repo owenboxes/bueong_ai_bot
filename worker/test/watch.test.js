@@ -5,9 +5,9 @@ import { pick, parse, INSTANT, DIGEST } from "../src/sources.js";
 import { fakeD1 } from "./d1.js";
 
 const rss = (...ids) => `<rss>${ids.map((i) => `<item><title>글 ${i}</title><link>https://x/${i}</link><guid>${i}</guid><description><![CDATA[<p>본문 ${i}. 둘째]]></description></item>`).join("")}</rss>`;
-const cycleStart = Math.floor(Date.UTC(2026, 10, 14, 1) / 660_000) * 660_000;
+const cycleStart = Math.floor(Date.UTC(2026, 10, 14, 1) / 780_000) * 780_000;
 const at = (minute) => new Date(cycleStart + minute * 60_000); // 10시 전후 KST (무음 아님)
-const OPENAI = 5; // 분 5 → 즉시 알림 1번(OpenAI)
+const OPENAI = DIGEST.length + 1; // 즉시 알림 1번(OpenAI)
 
 let env, sent, feed, tgOk, realFetch;
 beforeEach(() => {
@@ -25,11 +25,11 @@ beforeEach(() => {
 afterEach(() => { globalThis.fetch = realFetch; });
 const rows = (sql) => env.DB.raw.prepare(sql).all();
 
-test("11개 출처를 시간 경계와 관계없이 균등하게 순환한다", () => {
+test("13개 출처를 시간 경계와 관계없이 균등하게 순환한다", () => {
   const names = [...DIGEST, ...INSTANT].map((src) => src.name);
-  assert.deepEqual(Array.from({ length: 33 }, (_, m) => pick(at(m)).name), [...names, ...names, ...names]);
+  assert.deepEqual(Array.from({ length: 39 }, (_, m) => pick(at(m)).name), [...names, ...names, ...names]);
   const hour = Date.UTC(2026, 10, 14, 2);
-  assert.equal(new Set(Array.from({ length: 11 }, (_, m) => pick(new Date(hour + (m - 5) * 60_000)).name)).size, 11);
+  assert.equal(new Set(Array.from({ length: 13 }, (_, m) => pick(new Date(hour + (m - 6) * 60_000)).name)).size, 13);
 });
 
 test("첫 실행은 기록만, 다음 차례에 새 글만 버튼과 함께 보낸다", async () => {
@@ -59,9 +59,9 @@ test("보내기 실패한 글은 기록하지 않고 1시간 뒤 다시 시도�
   assert.equal(rows("SELECT * FROM retry").length, 1);
   tgOk = true;
   const before = sent.length; // 실패한 시도도 sent에 남는다
-  await watch(env, at(OPENAI + 11)); // 11분 뒤 OpenAI 차례: 아직 대기 중 → 건너뜀
+  await watch(env, at(OPENAI + 13)); // 13분 뒤 OpenAI 차례: 아직 대기 중 → 건너뜀
   assert.equal(sent.length, before);
-  await watch(env, at(OPENAI + 66)); // 66분 뒤 같은 차례: 다시 시도
+  await watch(env, at(OPENAI + 65)); // 65분 뒤 같은 차례: 다시 시도
   assert.equal(sent.length, before + 1);
   assert.equal(rows("SELECT * FROM retry").length, 0);
   assert.equal(rows("SELECT * FROM seen WHERE id = 'b'").length, 1);
@@ -100,15 +100,15 @@ test("Anthropic: 목록에서 주소를 뽑고, 새 글 제목은 글 페이지�
   const items = parse(INSTANT[0], '<a href="/news/claude-x">x</a><a href="/news/claude-x">x</a><a href="/news/b-2">');
   assert.deepEqual(items.map((i) => i.id), ["https://www.anthropic.com/news/claude-x", "https://www.anthropic.com/news/b-2"]);
   feed = '<a href="/news/old">';
-  await watch(env, at(4));
+  await watch(env, at(DIGEST.length)); // Anthropic
   feed = '<a href="/news/new-model"><a href="/news/old"><meta property="og:title" content="New &amp; Model">';
-  await watch(env, at(4));
+  await watch(env, at(DIGEST.length)); // Anthropic
   assert.equal(sent.length, 1);
   assert.match(sent[0].text, /<b>New &amp; Model<\/b>/);
 });
 
 test("제외된 글뿐인 첫 피드도 기준점을 남겨 다음 정식 릴리스를 보낸다", async () => {
-  const codex = at(10);
+  const codex = at(DIGEST.length + 6);
   feed = rss("a-alpha");
   await watch(env, codex);
   assert.equal(sent.length, 0);
@@ -124,6 +124,16 @@ test("HN·GitHub JSON 파싱과 include/exclude", () => {
   const gh = parse(DIGEST[2], JSON.stringify({ items: [{ full_name: "a/b", description: "agent kit", html_url: "https://github.com/a/b" }] }));
   assert.equal(gh[0].title, "a/b — agent kit");
   assert.match(DIGEST[2].url(at(0)), /created:%3E2026-11-07&/);
+  const kr = DIGEST.find((s) => s.type === "discourse");
+  // 실제 응답처럼 fancy_title이 먼저, 글 안에 posters 배열·중괄호 든 제목
+  const topic = (id, title) => ({ fancy_title: title, id, title, slug: `t-${id}`, posters: [{ user_id: 9, extras: "latest" }] });
+  const json = JSON.stringify({ users: [{ id: 9, username: "u" }], topic_list: { can_create_topic: false, topics: [topic(1, '모델 "A" {공개}]'), topic(2, "에이전트")] } });
+  assert.deepEqual(parse(kr, json.slice(0, json.lastIndexOf('"slug":"t-2"') + 5)), [ // 잘린 응답: 끝까지 온 글만
+    { id: "1", title: '모델 "A" {공개}]', url: "https://discuss.pytorch.kr/t/t-1/1", summary: "" },
+  ]);
+  assert.deepEqual(parse(kr, json).map((i) => i.id), ["1", "2"]);
+  const spaced = JSON.stringify({ suggested: { topics: [topic(7, "x")] }, topic_list: { topics: [topic(1, "y")] } }, null, 1);
+  assert.deepEqual(parse(kr, spaced).map((i) => i.id), ["1"]); // topic_list 밖 topics·콜론 뒤 공백
   const codex = INSTANT.find((s) => s.name === "Codex 릴리스");
   const atom = '<feed><entry><id>1</id><title>0.9.0</title></entry><entry><id>2</id><title>0.9.0-alpha.1</title></entry></feed>';
   assert.deepEqual(parse(codex, atom).map((i) => i.id), ["1"]);
