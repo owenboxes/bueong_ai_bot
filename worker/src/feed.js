@@ -16,7 +16,8 @@ export function parseFeed(xml) {
   for (const m of xml.matchAll(/<(item|entry)\b[\s\S]*?<\/\1>/g)) {
     const b = m[0];
     const title = decode((b.match(/<title[^>]*>([\s\S]*?)<\/title>/) || [])[1] || "");
-    const url = decode((b.match(/<link[^>]*href="([^"]+)"/) || b.match(/<link>([\s\S]*?)<\/link>/) || [])[1] || "");
+    // href는 큰따옴표·작은따옴표 둘 다 (GeekNews Atom은 href='…'), <link>텍스트</link>는 앞뒤 공백 제거
+    const url = decode((b.match(/<link[^>]*href=(["'])([^"']+)\1/) || [])[2] || (b.match(/<link>([\s\S]*?)<\/link>/) || [])[1] || "").trim();
     const id = decode((b.match(/<(guid|id)\b[^>]*>([\s\S]*?)<\/\1>/) || [])[2] || url);
     const body = (b.match(/<(description|summary|content)\b[^>]*>([\s\S]*?)<\/\1>/) || [])[2] || "";
     if (id) out.push({ id, title, url, summary: body });

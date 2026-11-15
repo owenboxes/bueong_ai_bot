@@ -28,3 +28,8 @@ test("본문: CDATA·엔티티로 온 태그를 빼고 공백을 줄인다", () 
   assert.equal(stripHtml(parseFeed(atom)[0].summary), "Hi there x");
   assert.equal(stripHtml("<![CDATA[<p>a</p><p>b</p>]]>"), "a b");
 });
+
+test("Atom 링크: 작은따옴표 href도 읽는다 (GeekNews)", () => {
+  const atom = "<feed><entry><id>https://news.hada.io/topic?id=1</id><title>Show GN</title><link rel='alternate' type='text/html' href='https://news.hada.io/topic?id=1&amp;x=2' /></entry></feed>";
+  assert.equal(parseFeed(atom)[0].url, "https://news.hada.io/topic?id=1&x=2");
+});
