@@ -14,8 +14,9 @@ const D1_MAX_PARAMS = 100; // D1은 쿼리 하나에 바인딩 값 100개까지
 
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-export async function get(url, max) {
-  const res = await fetch(url, { headers: { "user-agent": UA }, signal: AbortSignal.timeout(FEED_TIMEOUT_MS) });
+export async function get(url, max, headers = {}) {
+  const secret = Object.keys(headers).length > 0; // 키 헤더가 붙은 요청은 다른 호스트로 넘어가지 않게
+  const res = await fetch(url, { headers: { "user-agent": UA, ...headers }, redirect: secret ? "error" : "follow", signal: AbortSignal.timeout(FEED_TIMEOUT_MS) });
   if (!res.ok) {
     await res.body?.cancel();
     throw new Error(`HTTP ${res.status}`);
@@ -93,15 +94,17 @@ export async function watch(env, now = new Date(), persona = "") {
   let read, items;
   try {
     const max = src.max || MAX_BYTES;
-    const isJson = src.type === "hn" || src.type === "github";
-    read = await get(typeof src.url === "function" ? src.url(now) : src.url, max + (isJson ? 1 : 0));
+    const isJson = ["hn", "github", "youtube"].includes(src.type);
+    read = await get(typeof src.url === "function" ? src.url(now) : src.url, max + (isJson ? 1 : 0), src.headers?.(env));
     if (isJson && read.bytes > max) throw new Error("JSON 응답이 상한보다 큼");
     items = parse(src, read.text, { unfiltered: true });
   } catch (e) { // 한 출처가 막혀도 다음 분에는 다른 출처를 읽는다. 연속 실패 수는 주간 리포트가 본다
+    // 키 헤더를 쓰는 출처는 예외 원문에 키가 섞일 수 있어 정해진 문구만 남긴다
+    const error = !src.headers || /^(HTTP \d+|YT_KEY 없음)$/.test(e.message) ? e.message.slice(0, 200) : "요청 실패 (내용 숨김)";
     await db.prepare(`INSERT INTO health (source, fails, last_error, at) VALUES (?, 1, ?, ?)
       ON CONFLICT(source) DO UPDATE SET fails = fails + 1, last_error = excluded.last_error, at = excluded.at`)
-      .bind(name, e.message.slice(0, 200), at).run();
-    console.log(JSON.stringify({ event: "read_failed", source: name, error: e.message }));
+      .bind(name, error, at).run();
+    console.log(JSON.stringify({ event: "read_failed", source: name, error }));
     return;
   }
 
@@ -131,7 +134,7 @@ export async function watch(env, now = new Date(), persona = "") {
     for (const it of fresh.slice(0, MAX_SEND)) {
       try {
         if (!it.title) await fillTitle(it);
-        const lines = await summarize(env, name, { ...it, summary: stripHtml(it.summary) }, persona);
+        const lines = src.type === "youtube" ? [] : await summarize(env, name, { ...it, summary: stripHtml(it.summary) }, persona); // 영상은 제목만
         const key = await alertKey(name, it.id);
         await tg(env, "sendMessage", {
           chat_id: env.TG_CHAT_ID, parse_mode: "HTML", disable_web_page_preview: true,

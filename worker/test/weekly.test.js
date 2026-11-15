@@ -4,7 +4,7 @@ import { weekly, stats, report } from "../src/weekly.js";
 import { sendOutbox } from "../src/digest.js";
 import { handleUpdate } from "../src/inbox.js";
 import { watch } from "../src/watch.js";
-import { INSTANT, DIGEST } from "../src/sources.js";
+import { INSTANT, DIGEST, SLOTS } from "../src/sources.js";
 import { fakeD1 } from "./d1.js";
 
 const SUN = new Date(Date.UTC(2026, 10, 15, 11)); // 일 20:00 KST
@@ -80,7 +80,7 @@ test("「그렇게 해줘」를 누르면 그 출처의 새 글이 즉시 알림
   assert.match((await handleUpdate(press("w:999", 52), env)).text, /오래된 알림/);
   assert.match((await handleUpdate(press("w:__proto__", 53), env)).text, /오래된 알림/);
 
-  const turn = new Date(Math.ceil(SUN.getTime() / 780_000) * 780_000 + (DIGEST.length + turnIndex) * 60_000); // OpenAI 차례인 분
+  const turn = new Date(Math.ceil(SUN.getTime() / (SLOTS.length * 60_000)) * SLOTS.length * 60_000 + (SLOTS.findIndex((s) => s[0].mode === "instant") + turnIndex) * 60_000); // OpenAI 차례인 분
   put("INSERT INTO seen VALUES ('OpenAI 공식 블로그', 'a', ?)", DAY_AGO);
   await watch(env, turn);
   assert.equal(sent.length, 0);

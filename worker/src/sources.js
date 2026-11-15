@@ -15,6 +15,23 @@ export const INSTANT = [
   { id: "sdk-py", name: "Claude Agent SDK (Python) 릴리스", type: "feed", url: "https://github.com/anthropics/claude-agent-sdk-python/releases.atom" },
   { id: "sdk-ts", name: "Claude Agent SDK (TypeScript) 릴리스", type: "feed", url: "https://github.com/anthropics/claude-agent-sdk-typescript/releases.atom" },
   { id: "codex", name: "Codex 릴리스", type: "feed", url: "https://github.com/openai/codex/releases.atom", exclude: "-(alpha|beta|rc)" },
+  // 유튜브: 채널 RSS가 404(2026-11-15)라 YouTube Data API(무료 1회 1단위, 키는 Worker 비밀값 YT_KEY). 제목·링크만, Gemini 요약 없이 즉시 알림 (사용자 결정 2026-11-15)
+  // 채널 id는 Gemini가 채널 페이지 externalId로 확인. 4개가 순환 한 칸을 나눠 쓴다(group): 채널마다 약 56분 간격
+  ...[
+    ["yt-aiscene", "AI씬", "UCqjmg0AJYxGcLBgGKTsU2sQ"],
+    ["yt-teddynote", "테디노트", "UCt2wAAXgm87ACiQnDHQEW6Q"],
+    ["yt-jocoding", "조코딩", "UCQNE2JmbasNYbjGAcuBiRRg"],
+    ["yt-gussi", "시민개발자 구씨", "UCDLlMjELbrJdETmSiAB68AA"],
+  ].map(([key, who, id]) => ({
+    // 키는 주소가 아니라 헤더로 (주소는 오류·로그에 남을 수 있다). 20건: 56분 사이 밀려도 놓치지 않게, fields로 작게
+    id: key, name: `유튜브 · ${who}`, type: "youtube", group: "youtube", max: 32 * 1024,
+    url: `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=20&playlistId=UU${id.slice(2)}`
+      + "&fields=items(snippet(title,resourceId(videoId)))",
+    headers: (env) => {
+      if (!env?.YT_KEY) throw new Error("YT_KEY 없음");
+      return { "x-goog-api-key": env.YT_KEY };
+    },
+  })),
 ].map((s) => ({ ...s, mode: "instant" }));
 
 export const DIGEST = [
@@ -40,10 +57,18 @@ export const DIGEST = [
   { name: "PyTorch KR", type: "discourse", url: "https://discuss.pytorch.kr/latest.json" },
 ].map((s) => ({ ...s, mode: "digest" }));
 
-const SOURCES = [...DIGEST, ...INSTANT];
+// 순환 칸: 출처 하나가 한 칸, 같은 group은 한 칸을 차례로 나눠 쓴다
+export const SLOTS = [];
+for (const s of [...DIGEST, ...INSTANT]) {
+  const slot = s.group && SLOTS.find((x) => x[0].group === s.group);
+  if (slot) slot.push(s); else SLOTS.push([s]);
+}
 
-// 매분 한 출처씩 13분 주기로 균등 순환한다 (운영판도 같음). 정각에도 순번을 이어간다.
-export const pick = (now) => SOURCES[Math.floor(now.getTime() / 60_000) % SOURCES.length];
+// 매분 한 칸씩 14분 주기로 균등 순환한다 (운영판도 같음). 정각에도 순번을 이어간다.
+export const pick = (now) => {
+  const m = Math.floor(now.getTime() / 60_000), slot = SLOTS[m % SLOTS.length];
+  return slot[Math.floor(m / SLOTS.length) % slot.length];
+};
 
 /** 응답 본문을 [{id, title, url, summary}]로. 늘 글이 있는 출처라 0건이면 구조가 바뀐 것으로 본다 */
 export function parse(src, text, { unfiltered = false } = {}) {
@@ -65,6 +90,10 @@ export function parse(src, text, { unfiltered = false } = {}) {
   } else if (src.type === "discourse") {
     const base = new URL(src.url).origin;
     items = topics(text).map((t) => ({ id: String(t.id), title: t.title || "", url: `${base}/t/${t.slug}/${t.id}`, summary: "" }));
+  } else if (src.type === "youtube") {
+    items = JSON.parse(text).items.map(({ snippet: s }) => ({
+      id: s.resourceId.videoId, title: s.title || "", url: `https://www.youtube.com/watch?v=${s.resourceId.videoId}`, summary: "",
+    }));
   } else throw new Error(`모르는 type: ${src.type}`);
   if (!items.length) throw new Error("파싱 결과 0건 (구조 변경 의심)");
   if (unfiltered) return items;

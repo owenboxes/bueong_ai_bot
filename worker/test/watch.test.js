@@ -1,13 +1,14 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { watch, alertKey, formatInstant, isQuiet } from "../src/watch.js";
-import { pick, parse, INSTANT, DIGEST } from "../src/sources.js";
+import { pick, parse, INSTANT, DIGEST, SLOTS } from "../src/sources.js";
 import { fakeD1 } from "./d1.js";
 
 const rss = (...ids) => `<rss>${ids.map((i) => `<item><title>글 ${i}</title><link>https://x/${i}</link><guid>${i}</guid><description><![CDATA[<p>본문 ${i}. 둘째]]></description></item>`).join("")}</rss>`;
-const cycleStart = Math.floor(Date.UTC(2026, 10, 14, 1) / 780_000) * 780_000;
+const CYCLE = SLOTS.length * 60_000, FIRST_INSTANT = SLOTS.findIndex((s) => s[0].mode === "instant");
+const cycleStart = Math.floor(Date.UTC(2026, 10, 14, 1) / CYCLE) * CYCLE;
 const at = (minute) => new Date(cycleStart + minute * 60_000); // 10시 전후 KST (무음 아님)
-const OPENAI = DIGEST.length + 1; // 즉시 알림 1번(OpenAI)
+const OPENAI = FIRST_INSTANT + 1; // 즉시 알림 1번(OpenAI)
 
 let env, sent, feed, tgOk, realFetch;
 beforeEach(() => {
@@ -25,11 +26,15 @@ beforeEach(() => {
 afterEach(() => { globalThis.fetch = realFetch; });
 const rows = (sql) => env.DB.raw.prepare(sql).all();
 
-test("13개 출처를 시간 경계와 관계없이 균등하게 순환한다", () => {
-  const names = [...DIGEST, ...INSTANT].map((src) => src.name);
-  assert.deepEqual(Array.from({ length: 39 }, (_, m) => pick(at(m)).name), [...names, ...names, ...names]);
-  const hour = Date.UTC(2026, 10, 14, 2);
-  assert.equal(new Set(Array.from({ length: 13 }, (_, m) => pick(new Date(hour + (m - 6) * 60_000)).name)).size, 13);
+test("출처를 시간 경계와 관계없이 균등하게 순환하고, 유튜브 채널은 한 칸을 나눠 쓴다", () => {
+  assert.equal(SLOTS.length, 14);
+  const yt = SLOTS.find((s) => s[0].group === "youtube");
+  assert.equal(yt.length, 4);
+  const n = SLOTS.length * yt.length, counts = {};
+  for (let m = 0; m < n; m++) { const name = pick(new Date(Date.UTC(2026, 10, 14, 2) + (m - 7) * 60_000)).name; counts[name] = (counts[name] || 0) + 1; }
+  for (const src of [...DIGEST, ...INSTANT]) assert.equal(counts[src.name], src.group ? 1 : yt.length, src.name);
+  const solo = INSTANT.filter((src) => !src.group);
+  assert.deepEqual(solo.map((src, i) => pick(at(FIRST_INSTANT + i)).name), solo.map((src) => src.name));
 });
 
 test("첫 실행은 기록만, 다음 차례에 새 글만 버튼과 함께 보낸다", async () => {
@@ -59,9 +64,9 @@ test("보내기 실패한 글은 기록하지 않고 1시간 뒤 다시 시도�
   assert.equal(rows("SELECT * FROM retry").length, 1);
   tgOk = true;
   const before = sent.length; // 실패한 시도도 sent에 남는다
-  await watch(env, at(OPENAI + 13)); // 13분 뒤 OpenAI 차례: 아직 대기 중 → 건너뜀
+  await watch(env, at(OPENAI + 14)); // 14분 뒤 OpenAI 차례: 아직 대기 중 → 건너뜀
   assert.equal(sent.length, before);
-  await watch(env, at(OPENAI + 65)); // 65분 뒤 같은 차례: 다시 시도
+  await watch(env, at(OPENAI + 70)); // 70분 뒤 같은 차례: 다시 시도
   assert.equal(sent.length, before + 1);
   assert.equal(rows("SELECT * FROM retry").length, 0);
   assert.equal(rows("SELECT * FROM seen WHERE id = 'b'").length, 1);
@@ -100,15 +105,15 @@ test("Anthropic: 목록에서 주소를 뽑고, 새 글 제목은 글 페이지�
   const items = parse(INSTANT[0], '<a href="/news/claude-x">x</a><a href="/news/claude-x">x</a><a href="/news/b-2">');
   assert.deepEqual(items.map((i) => i.id), ["https://www.anthropic.com/news/claude-x", "https://www.anthropic.com/news/b-2"]);
   feed = '<a href="/news/old">';
-  await watch(env, at(DIGEST.length)); // Anthropic
+  await watch(env, at(FIRST_INSTANT)); // Anthropic
   feed = '<a href="/news/new-model"><a href="/news/old"><meta property="og:title" content="New &amp; Model">';
-  await watch(env, at(DIGEST.length)); // Anthropic
+  await watch(env, at(FIRST_INSTANT)); // Anthropic
   assert.equal(sent.length, 1);
   assert.match(sent[0].text, /<b>New &amp; Model<\/b>/);
 });
 
 test("제외된 글뿐인 첫 피드도 기준점을 남겨 다음 정식 릴리스를 보낸다", async () => {
-  const codex = at(DIGEST.length + 6);
+  const codex = at(FIRST_INSTANT + 6);
   feed = rss("a-alpha");
   await watch(env, codex);
   assert.equal(sent.length, 0);
@@ -118,12 +123,51 @@ test("제외된 글뿐인 첫 피드도 기준점을 남겨 다음 정식 릴리
   assert.match(sent[0].text, /글 b/);
 });
 
+test("유튜브: 키는 헤더로만, 리디렉션 금지, 실패 기록에 예외 원문(키)이 남지 않는다", async () => {
+  const yt = SLOTS.findIndex((s) => s[0].group === "youtube");
+  env.YT_KEY = "SECRET";
+  let init;
+  globalThis.fetch = async (url, i) => { init = i; assert.doesNotMatch(String(url), /SECRET/); throw new TypeError("bad header SECRET"); };
+  await watch(env, at(yt));
+  assert.equal(init.headers["x-goog-api-key"], "SECRET");
+  assert.equal(init.redirect, "error");
+  assert.deepEqual(rows("SELECT last_error FROM health").map((r) => r.last_error), ["요청 실패 (내용 숨김)"]);
+  globalThis.fetch = async () => new Response("", { status: 403 });
+  await watch(env, at(yt + SLOTS.length)); // 다음 채널
+  assert.ok(rows("SELECT last_error FROM health").some((r) => r.last_error === "HTTP 403"));
+});
+
+test("유튜브 새 영상은 Gemini 없이 제목만으로 즉시 알림", async () => {
+  const yt = SLOTS.findIndex((s) => s[0].group === "youtube"), same = SLOTS.length * 4; // 같은 채널이 다시 오는 간격
+  env.YT_KEY = "k"; env.GEMINI_API_KEY = "g";
+  const vids = (...ids) => JSON.stringify({ items: ids.map((v) => ({ snippet: { title: `영상 ${v}`, resourceId: { videoId: v } } })) });
+  const tgFetch = globalThis.fetch, gemini = [];
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes("generativelanguage")) gemini.push(url); // summarize가 예외를 삼키므로 끝난 뒤 건수로 본다
+    return String(url).includes("googleapis.com/youtube") ? new Response(feed) : tgFetch(url, init);
+  };
+  feed = vids("a");
+  await watch(env, at(yt)); // 첫 실행: 기록만
+  feed = vids("b", "a");
+  await watch(env, at(yt + same));
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /<b>영상 b<\/b>\n\n<a href="https:\/\/www\.youtube\.com\/watch\?v=b">/);
+  assert.equal(gemini.length, 0);
+});
+
 test("HN·GitHub JSON 파싱과 include/exclude", () => {
   const hn = parse(DIGEST[0], JSON.stringify({ hits: [{ objectID: "1", title: "New AI agent" }, { objectID: "2", title: "Rust 2.0", url: "https://r" }] }));
   assert.deepEqual(hn, [{ id: "1", title: "New AI agent", summary: "", url: "https://news.ycombinator.com/item?id=1" }]);
   const gh = parse(DIGEST[2], JSON.stringify({ items: [{ full_name: "a/b", description: "agent kit", html_url: "https://github.com/a/b" }] }));
   assert.equal(gh[0].title, "a/b — agent kit");
   assert.match(DIGEST[2].url(at(0)), /created:%3E2026-11-07&/);
+  const ytSrc = INSTANT.find((s) => s.type === "youtube");
+  assert.throws(() => ytSrc.headers({}), /YT_KEY 없음/);
+  assert.deepEqual(ytSrc.headers({ YT_KEY: "k" }), { "x-goog-api-key": "k" });
+  assert.match(ytSrc.url, /playlistId=UUqjmg0AJYxGcLBgGKTsU2sQ&/);
+  assert.doesNotMatch(ytSrc.url, /key=/);
+  assert.deepEqual(parse(ytSrc, JSON.stringify({ items: [{ snippet: { title: "에이전트 써보기", resourceId: { videoId: "abc" } } }] })),
+    [{ id: "abc", title: "에이전트 써보기", url: "https://www.youtube.com/watch?v=abc", summary: "" }]);
   const kr = DIGEST.find((s) => s.type === "discourse");
   // 실제 응답처럼 fancy_title이 먼저, 글 안에 posters 배열·중괄호 든 제목
   const topic = (id, title) => ({ fancy_title: title, id, title, slug: `t-${id}`, posters: [{ user_id: 9, extras: "latest" }] });
