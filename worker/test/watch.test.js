@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { watch, alertKey, formatInstant, isQuiet } from "../src/watch.js";
+import { watch, alertKey, formatInstant, isQuiet, isKorean } from "../src/watch.js";
 import { pick, parse, INSTANT, DIGEST, SLOTS } from "../src/sources.js";
 import { fakeD1 } from "./d1.js";
 
@@ -42,10 +42,10 @@ test("첫 실행은 기록만, 다음 차례에 새 글만 버튼과 함께 보�
   assert.equal(sent.length, 0);
   assert.equal(rows("SELECT * FROM seen").length, 1);
 
-  feed = rss("b", "a", "b"); // 같은 글이 두 번 나와도 한 번만
+  feed = rss("b", "a", "b").replaceAll("<title>글 b</title>", "<title>New model b</title>").replaceAll("본문 b. 둘째", "Body b. Second"); // 같은 글이 두 번 나와도 한 번만
   await watch(env, at(OPENAI));
   assert.equal(sent.length, 1);
-  assert.match(sent[0].text, /<b>글 b<\/b>\n\n본문 b\.\n/); // 요약 실패 → 원문 첫 문장
+  assert.match(sent[0].text, /<b>New model b<\/b>\n\nBody b\.\n/); // 영어 글: 요약 실패 → 원문 첫 문장
   assert.equal(sent[0].disable_notification, false);
   const key = await alertKey("OpenAI 공식 블로그", "b");
   assert.equal(sent[0].reply_markup.inline_keyboard[0][0].callback_data, `u:${key}`);
@@ -99,7 +99,7 @@ test("23~08시 KST는 모든 출처를 알림 없이 대기열에, 낮에는 아
   await watch(env, at(1)); // 낮: GeekNews도 바로 보낸다
   assert.equal(sent.length, 1);
   assert.match(sent[0].text, /\[GeekNews\]/);
-  assert.doesNotMatch(sent[0].text, /본문 c/); // 뉴스 출처는 요약 없이 제목·링크만
+  assert.doesNotMatch(sent[0].text, /본문 c/); // 한국어 글은 요약 없이 제목·링크만
 });
 
 test("주간 리포트로 아침 요약에 옮긴 출처는 낮에도 대기열", async () => {
@@ -226,4 +226,11 @@ test("알림 형식·무음 시간·키", async () => {
   assert.ok(t.includes("a".repeat(300) + "…</b>"));
   assert.ok(t.includes("한 줄 &lt;b&gt;\n\n"));
   assert.ok(t.includes('href="https://x/?a=1&amp;b=&quot;2&quot;"'));
+});
+
+test("한국어 판별: 한국어면 요약 생략, 영어·버전 번호면 요약", () => {
+  assert.equal(isKorean("구글, 제미나이에 월렛 연결 AI agent"), true);
+  assert.equal(isKorean("Show HN: An agent framework for Claude"), false);
+  assert.equal(isKorean("v2.1.325"), false);
+  assert.equal(isKorean("Claude Code 2.1 출시"), false); // 한글이 30% 미만이면 다른 언어로 본다
 });

@@ -25,6 +25,12 @@ export async function get(url, max, headers = {}) {
   return readHead(res, max);
 }
 
+/** 글자(한글·라틴) 중 한글이 30% 이상이면 한국어로 본다. 글자가 없으면(버전 번호뿐 등) 한국어 아님 → 요약 */
+export function isKorean(text) {
+  const ko = (text.match(/[가-힣]/g) || []).length, latin = (text.match(/[A-Za-z]/g) || []).length;
+  return ko > 0 && ko / (ko + latin) >= 0.3;
+}
+
 export const isQuiet = (now) => {
   const h = (now.getUTCHours() + 9) % 24; // KST
   return h >= 23 || h < 8; // 23:00~08:00 KST는 무음 전송
@@ -142,8 +148,9 @@ export async function watch(env, now = new Date(), persona = "") {
     for (const it of fresh.slice(0, MAX_SEND)) {
       try {
         if (!it.title) await fillTitle(it);
-        // 요약은 공식 출처만, 본문은 앞 2,000자 (토큰 대부분이 읽히는 본문이라 2026-11-15 6,000→2,000)
-        const lines = src.summarize ? await summarize(env, name, { ...it, summary: stripHtml(it.summary).slice(0, SUMMARY_BODY) }, persona) : [];
+        // 한국어 글은 제목·링크만, 다른 언어면 Gemini 요약 (사용자 결정 2026-11-15). 본문은 앞 2,000자 (토큰 대부분이 읽히는 본문)
+        const body = stripHtml(it.summary).slice(0, SUMMARY_BODY);
+        const lines = isKorean(`${it.title} ${body}`) ? [] : await summarize(env, name, { ...it, summary: body }, persona);
         const key = await alertKey(name, it.id);
         await tg(env, "sendMessage", {
           chat_id: env.TG_CHAT_ID, parse_mode: "HTML", disable_web_page_preview: true,

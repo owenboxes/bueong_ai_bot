@@ -14,9 +14,17 @@ export const FORMAT =
   "2줄: '→ '로 시작하는, 이게 왜 중요한지 한 문장. 다른 말은 쓰지 마세요.";
 export const DEFAULT_PERSONA =
   "당신은 AI 소식을 차분한 존댓말로 전하는 올빼미 '부엉'입니다.";
+export const CATEGORIES = [
+  "모델·제품 발표",
+  "에이전트·코딩 도구",
+  "오픈소스·GitHub",
+  "연구·논문",
+  "업계·정책",
+  "기타",
+];
 export const RANK_FORMAT =
-  "아래 글 목록을 중요도 기준에 따라 등급을 매기세요. JSON 배열로만 답하세요. " +
-  '각 원소: {"i": 글 번호, "tier": 1|2|3, "line": "1·2등급만, 한국어 한 문장 요약 (3등급은 빈 문자열)"}. ' +
+  "아래 글 목록을 중요도와 분야로 분류하세요. JSON 배열로만 답하세요. " +
+  `각 원소: {"i": 글 번호, "tier": 1|2|3, "cat": ${CATEGORIES.join("|")}, "line": "1·2등급만, 한국어 한 문장 요약 (3등급은 빈 문자열)"}. ` +
   "모든 글 번호를 한 번씩 포함하세요.";
 export const DEFAULT_PRIORITIES =
   "1등급: 에이전트·SDK·도구 사용법, 신제품·요금·정책 변경. 2등급: 따라 해볼 수 있는 튜토리얼·예제. 나머지 3등급.";
@@ -141,10 +149,10 @@ export async function summarize(env, srcName, item, persona) {
   return s ? [s] : [];
 }
 
-/** Gemini rank 응답 배열을 검증해 `[tier, line]` 배열로 변환한다. 형식이 어긋나면 null. */
+/** Gemini rank 응답 배열을 검증해 `[tier, line, cat]` 배열로 변환한다. 형식이 어긋나면 null. */
 export function checkRanks(rows, n) {
   if (!Array.isArray(rows) || rows.length === 0) return null;
-  const result = Array.from({ length: n }, () => [3, ""]);
+  const result = Array.from({ length: n }, () => [3, "", "기타"]);
   const seen = new Set();
 
   for (const r of rows) {
@@ -164,21 +172,24 @@ export function checkRanks(rows, n) {
       return null;
     }
     seen.add(i);
+    const rawCat = typeof r.cat === "string" ? r.cat.trim() : "";
+    const cat = CATEGORIES.includes(rawCat) ? rawCat : "기타";
     result[i] = [
       tier,
       typeof line === "string" && line.length <= LINE_MAX ? line.trim() : "",
+      cat,
     ];
   }
   return result;
 }
 
 /**
- * 아침 요약 대기열 항목들의 중요도 등급과 한 줄 요약을 매긴다.
+ * 아침 요약 대기열 항목들의 중요도 등급, 한 줄 요약, 분야를 매긴다.
  * @param {{ GEMINI_API_KEY?: string }} env
  * @param {Array<{ source: string, title: string, url?: string }>} items
  * @param {string} [persona]
  * @param {string} [priorities]
- * @returns {Promise<Array<[number, string]> | null>}
+ * @returns {Promise<Array<[number, string, string]> | null>}
  */
 export async function rank(env, items, persona, priorities) {
   const key = env?.GEMINI_API_KEY;

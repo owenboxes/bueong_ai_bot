@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import {
   summarize,
   rank,
+  checkRanks,
   summarizeLink,
   firstSentence,
   validLines,
+  CATEGORIES,
   DEFAULT_PERSONA,
   DEFAULT_PRIORITIES,
   FORMAT,
@@ -167,9 +169,9 @@ test("rank: 정상 응답과 빠진 번호는 3등급으로 채운다", async (t
     return makeOkResponse([
       {
         text: JSON.stringify([
-          { i: 0, tier: 1, line: "핵심 소식이에요." },
-          // i=1은 의도적으로 빠짐 -> [3, ""] 처리
-          { i: 2, tier: 2, line: "  참고할 만해요.  " },
+          { i: 0, tier: 1, cat: "모델·제품 발표", line: "핵심 소식이에요." },
+          // i=1은 의도적으로 빠짐 -> [3, "", "기타"] 처리
+          { i: 2, tier: 2, cat: "연구·논문", line: "  참고할 만해요.  " },
         ]),
       },
     ]);
@@ -177,9 +179,9 @@ test("rank: 정상 응답과 빠진 번호는 3등급으로 채운다", async (t
 
   const result = await rank({ GEMINI_API_KEY: "secret-test-key" }, RANK_ITEMS, "", "");
   assert.deepEqual(result, [
-    [1, "핵심 소식이에요."],
-    [3, ""],
-    [2, "참고할 만해요."],
+    [1, "핵심 소식이에요.", "모델·제품 발표"],
+    [3, "", "기타"],
+    [2, "참고할 만해요.", "연구·논문"],
   ]);
   assert.equal(capturedBody.generationConfig.responseMimeType, "application/json");
   assert.equal(
@@ -248,6 +250,22 @@ test("rank: 키가 없으면 fetch 없이 바로 null을 반환한다", async (t
   assert.equal(await rank({}, RANK_ITEMS, "p", "pr"), null);
   assert.equal(await rank({ GEMINI_API_KEY: "k" }, [], "p", "pr"), null);
   assert.equal(fetchCalled, false);
+});
+
+test("checkRanks: cat이 없거나 목록에 없는 값이면 기타로 대체하고 실패시키지 않는다", () => {
+  const rows = [
+    { i: 0, tier: 1, cat: "에이전트·코딩 도구", line: "정상 분야" },
+    { i: 1, tier: 2, line: "cat 없음" },
+    { i: 2, tier: 3, cat: "존재하지 않는 분야", line: "" },
+    { i: 3, tier: 2, cat: 123, line: "숫자 cat" },
+  ];
+  assert.deepEqual(checkRanks(rows, 4), [
+    [1, "정상 분야", "에이전트·코딩 도구"],
+    [2, "cat 없음", "기타"],
+    [3, "", "기타"],
+    [2, "숫자 cat", "기타"],
+  ]);
+  assert.equal(CATEGORIES.includes("기타"), true);
 });
 
 test("summarizeLink: 정상 한 문장 요약과 프롬프트 주입 방지 지시문 포함", async (t) => {

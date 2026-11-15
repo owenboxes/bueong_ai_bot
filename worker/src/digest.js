@@ -2,7 +2,7 @@
 // - prepare (cron 0 23 * * *, 08:00 KST): 대기열을 Gemini로 정렬해 보낼 메시지(outbox)와 전체 목록 페이지(digests)를 확정하고 대기열·고정 구역을 비운다
 // - sendOutbox (매분 cron): outbox를 이어 보낸다. 성공한 조각까지 진행도를 저장해 실패해도 다음 분에 이어 보낸다
 // 전체 목록은 공개 저장소 대신 D1에 두고 Worker 주소 /digest/<무작위 32자>로 보여준다 (비밀 링크)
-import { rank } from "./gemini.js";
+import { rank, CATEGORIES } from "./gemini.js";
 import { renderList, safeHttpUrl } from "./page.js";
 import { tg } from "./telegram.js";
 import { toSheet } from "./sheet.js";
@@ -46,9 +46,10 @@ export function build(items, ranks, listUrl, pinned = []) {
     blocks.push("오늘은 중요도 정렬을 못 했어요. 출처별로 모아뒀어요.", ...[...counts].map(([s, n]) => `• ${esc(s.slice(0, 40))} ${n}건`), listLink(listUrl));
     return [...blocks, ...pinnedBlocks(pinned)];
   }
-  for (const [tier, name] of [[1, "꼭 볼 것"], [2, "알아두면 좋은 것"]]) {
-    const picked = items.map((it, i) => [it, ranks[i]]).filter(([, r]) => r[0] === tier);
-    if (picked.length) blocks.push(`\n━ ${name} (${picked.length})`, ...picked.map(([it, r], n) => `${n + 1}. ${link(it, r[1])}`));
+  // 분야별로 묶고 그 안에서 중요한 순 (1등급 ⭐). 텔레그램엔 1·2등급만, 3등급은 전체 목록 페이지에
+  for (const cat of CATEGORIES) {
+    const picked = items.map((it, i) => [it, ranks[i]]).filter(([, r]) => r[0] <= 2 && (r[2] || "기타") === cat).sort((a, b) => a[1][0] - b[1][0]);
+    if (picked.length) blocks.push(`\n━ ${cat} (${picked.length})`, ...picked.map(([it, r]) => `${r[0] === 1 ? "⭐ " : "• "}${link(it, r[1])}`));
   }
   blocks.push(`\n━ 나머지 (${ranks.filter((r) => r[0] === 3).length}) ${listLink(listUrl)}`);
   return [...blocks, ...pinnedBlocks(pinned), "\n위에 있는 것만 봐도 충분해요. 오늘도 잘 다녀와요."];

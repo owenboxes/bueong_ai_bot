@@ -29,8 +29,10 @@ test("build: 빈 날·핀만 있는 날·정렬 실패·정렬 성공", () => {
   assert.ok(onlyPin.indexOf("📌 보내준 링크 (1)") < onlyPin.indexOf("🌙 자세히 보기로 한 글 (1)"));
   const noRank = build([it(1), it(2), it(3, "HN")], null, "https://w/digest/b").join("\n");
   assert.match(noRank, /• GeekNews 2건\n• HN 1건\n<a href="https:\/\/w\/digest\/b">/);
-  const ranked = build([it(1), it(2), it(3)], [[2, "요약 <b>"], [1, ""], [3, ""]], "https://w/d").join("\n");
-  assert.ok(ranked.indexOf("꼭 볼 것 (1)") < ranked.indexOf("알아두면 좋은 것 (1)"));
+  const ranked = build([it(1), it(2), it(3), it(4)], [[2, "요약 <b>", "연구·논문"], [1, "", "연구·논문"], [3, "", "기타"], [1, "", "모델·제품 발표"]], "https://w/d").join("\n");
+  assert.ok(ranked.indexOf("모델·제품 발표 (1)") < ranked.indexOf("연구·논문 (2)")); // 분야 순서
+  assert.ok(ranked.indexOf("⭐ [GeekNews] <a href=\"https://x/2\">") < ranked.indexOf("• [GeekNews] <a href=\"https://x/1\">")); // 분야 안에서 1등급 먼저
+  assert.doesNotMatch(ranked, /글 3</); // 3등급은 페이지에만
   assert.match(ranked, /글 1<\/a> – 요약 &lt;b&gt;/);
   assert.match(ranked, /나머지 \(1\)/);
   assert.match(build([it(1)], null, undefined).join("\n"), /주소가 설정되지 않았어요/);

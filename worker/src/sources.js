@@ -32,7 +32,7 @@ export const INSTANT = [
       return { "x-goog-api-key": env.YT_KEY.trim() }; // 붙여 넣을 때 섞인 줄바꿈·공백은 헤더 오류(TypeError)가 된다
     },
   })),
-].map((s) => ({ summarize: s.type !== "youtube", ...s, mode: "instant" })); // 요약은 공식 7곳만 (릴리스 제목은 버전뿐이라), 나머지는 제목·링크
+].map((s) => ({ ...s, mode: "instant" }));
 
 export const DIGEST = [
   {
