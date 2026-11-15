@@ -15,8 +15,8 @@ const D1_MAX_PARAMS = 100; // D1은 쿼리 하나에 바인딩 값 100개까지
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 export async function get(url, max, headers = {}) {
-  const secret = Object.keys(headers).length > 0; // 키 헤더가 붙은 요청은 다른 호스트로 넘어가지 않게
-  const res = await fetch(url, { headers: { "user-agent": UA, ...headers }, redirect: secret ? "error" : "follow", signal: AbortSignal.timeout(FEED_TIMEOUT_MS) });
+  const secret = Object.keys(headers).length > 0; // 키 헤더가 붙은 요청은 다른 호스트로 넘어가지 않게: 3xx는 따라가지 않고 아래 !res.ok로 실패 (Workers는 redirect "error" 미지원 → TypeError)
+  const res = await fetch(url, { headers: { "user-agent": UA, ...headers }, redirect: secret ? "manual" : "follow", signal: AbortSignal.timeout(FEED_TIMEOUT_MS) });
   if (!res.ok) {
     await res.body?.cancel();
     throw new Error(`HTTP ${res.status}`);
